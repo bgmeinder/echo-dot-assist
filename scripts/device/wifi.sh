@@ -98,7 +98,7 @@ lease() {
 # On the network for real: a fresh lease (above) on the interface, and its router answers ARP on this link.  ARP rather
 # than the ping's answer: a router may drop pings, never ARP.  Without dhcpcd's properties: the interface's address.
 online() {
-    ip=$(ifconfig $WLAN 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p') gw=
+    ip=$(ifconfig $WLAN 2>/dev/null | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p') gw=
     [ -n "$ip" ] || return 1
     [ -n "$PROPS" ] || return 0
     [ "$(getprop dhcp.$WLAN.result)" = ok ] && [ "$(getprop dhcp.$WLAN.ipaddress)" = "$ip" ] &&
@@ -201,7 +201,7 @@ agateway() {
     grep "^$gw " $ARP 2>/dev/null | grep -q " 0x[26] .* $WLAN\$"
 }
 aonline() {
-    ip=$(ifconfig $WLAN 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
+    ip=$(ifconfig $WLAN 2>/dev/null | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p')
     [ -n "$ip" ] || return 1
     agateway
 }

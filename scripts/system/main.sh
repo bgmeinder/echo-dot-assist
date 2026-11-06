@@ -419,7 +419,8 @@ netwatch() {
             rm -f /data/local/hassmic/state/mdns
             [ -f $AVAHI_SVC ] && { echo "mDNS: announcing again (${why:-asked for}), avahi restarted"; avahi_start; }
         fi
-        if a=$(ifconfig $WLAN 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'); [ -n "$a" ]; then
+        # toybox's ifconfig says "inet addr:<a>", Fire OS 5's toolbox (rook) "wlan0: ip <a> mask ..." (0.0.0.0 unconnected)
+        if a=$(ifconfig $WLAN 2>/dev/null | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p'); [ -n "$a" ]; then
             miss=0
             [ "$a" = "$addr" ] || { addr=$a; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; }
             kmod

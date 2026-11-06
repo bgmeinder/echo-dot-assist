@@ -46,4 +46,4 @@ if [ "$S" != COMPLETED ]; then
     exit 1
 fi
 # DHCP is normally started by Amazon's netmgrd once the link is up; fall back to the init service.
-ifconfig wlan0 | grep -q "inet addr" || { start dhcpcd-wlan0; sleep 5; ifconfig wlan0 | grep "inet addr"; }
+ifconfig wlan0 | grep -qE "inet addr|: ip [1-9]" || { start dhcpcd-wlan0; sleep 5; ifconfig wlan0 | grep -E "inet addr|: ip [1-9]"; }

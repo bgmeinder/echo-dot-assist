@@ -701,7 +701,7 @@ install_satellite() {
     fi
     [ -n "$DRY" ] && return 0
     name=$(ashell "grep -o 'name: .* (node' /data/local/hassmic/boot.log" | tail -1 | sed 's/^name: //; s/ (node$//')
-    ip=$(ashell ifconfig $WLAN | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')     # toybox ifconfig; no ip on the Echo
+    ip=$(ashell ifconfig $WLAN | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p')     # toybox ifconfig; no ip on the Echo
     # hassmic logs its Sendspin pairing token at every start
     tok=$(ashell "grep -o 'SP:0[A-Z0-9]*' /data/local/hassmic/boot.log" | tail -1)
     printf 'SAT_NAME=%q\nSAT_IP=%q\nSAT_TOKEN=%q\n' "$name" "$ip" "$tok" > $OUT/setup.env

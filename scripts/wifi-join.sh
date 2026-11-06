@@ -42,7 +42,7 @@ print(hashlib.pbkdf2_hmac("sha1", p.encode(), s.encode(), 4096, 32).hex())') || 
     echo "joining $ssid ..."
     t=0 ip= secs=${WIFI_JOIN_SECS:-60}
     while [ $t -lt $secs ]; do
-        ip=$(adb shell ifconfig $WLAN | tr -d '\r' | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
+        ip=$(adb shell ifconfig $WLAN | tr -d '\r' | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p')
         [ -n "$ip" ] && break
         sleep 2; t=$((t + 2))
     done
