@@ -1124,6 +1124,9 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   whisper", 25 % of the reply volume by default), whatever assistant answers. Where Amazon's whisper model is not there
   (Amazon refuses it to the Echo Spot and the Echo Show 5), hassmic tells a whisper by itself: whispered speech has no
   pitch. "Download from Amazon" says so plainly when Amazon refuses a model, instead of asking for a new login.
+- **Echo Spot: headphones at a gentler volume.** Plugging headphones into the 3.5 mm jack turns the volume down to 75 %
+  of what it was ("Headphone volume", Sound) and unplugging puts it back; the Echo learns of the plug from the kernel,
+  nothing polls.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

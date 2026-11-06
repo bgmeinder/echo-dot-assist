@@ -3816,9 +3816,7 @@ Run in this order. Each step says what it proves.
       a time), and core_lux() read the file at every call: settings_available's light sensor check (twice) and
       send_light_states with core_lock held, so each settings walk under the lock waited on it.  core_lux() now hands
       out the last 1 Hz reading of a thread of its own (lux_thread; the first call reads itself).
-      (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
-      does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
-      HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.
+      Not yet: the guided setup (`scripts/setup.sh` has no steps for rook: by hand, `devices/rook/README.md`).
 - [~] Echo Show 8 1st gen (`crown`, 2026-10-13; `docs/re-crown.md`). Same platform as checkers: MT8163, Android 7.1.2,
       kernel 4.9.77, RT5616, gating latch, MT7668; Fire OS 6.5.7.0 NS6570 (6074). `libpryon.so` 2.41 (newer than the
       Show 5's; `pryon_test` loads the ALEXA model), `libasp.so` differs, `libopus`/`libz` as donut's. `devices/crown/`

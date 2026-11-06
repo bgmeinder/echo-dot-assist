@@ -88,6 +88,7 @@ const struct board board = {
      * recording): dark under 0.1, light again over 0.3 */
     .lux_dark = 0.1f,
     .lux_poll = 1,                                                  /* the driver converts for ~800 ms at each read */
+    .jack_state = "/sys/class/switch/h2w/state",                 /* 0 out, 1 headset, 2 headphones (2026-11-05) */
     .screen_round = 1,                                              /* the ring drawn around the rim of the round screen (ring_band.c) */
     /* the Spot's clock-face package: Amazon's analog faces as data (templates, faces, backgrounds) and their art,
      * read where it lies (clockface.c); stock's clock app that drew them is Alexa's and stays off */

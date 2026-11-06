@@ -62,6 +62,8 @@ struct board {
     /* 1: a read of light_sensor blocks (rook's OPT3001 driver converts for each read, ~800 ms, one reader at a time), so
      * a thread of its own reads it once a second and core_lux() hands out the last reading; 0: read when asked, as ever */
     int lux_poll;
+    const char *jack_state;         /* the headphone jack's switch ("0" out, "1"/"2" in): main.c sets headphone_volume % of
+                                       the volume while headphones are in and puts the speaker's back after; NULL: none */
     int screen_round;               /* 1: a round screen (rook): ring_band.c draws the light ring as a ring at the rim,
                                        light_band = its thickness, instead of a band along the bottom (ringbar's ring mode) */
     /* the firmware's own clock-face package (clockface.c: Amazon's analog faces, read where it lies) and its package
