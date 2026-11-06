@@ -2804,7 +2804,7 @@ static float lux_tcs3400(const char *dir)
 
 /* The light sensor as stock's HAL (libacehal_ambientLightSensor.so, its per-model "facade") reads it: a sysfs file the
  * kernel driver fills with calibrated lux, parsed with atof.  0..400 is all stock uses of it. */
-float core_lux(void)
+static float lux_read(void)
 {
     const char *e = getenv("HASSMIC_LUX");         /* tests */
     const char *const *p = e ? (const char *const[]){ e, NULL } : board.light_sensor;
@@ -2819,6 +2819,48 @@ float core_lux(void)
         return (float)atof(buf);
     }
     return NAN;
+}
+
+/* What core_lux() hands out: the last reading, taken once a second by a thread of its own.  A read is not a file read
+ * on every model: the Spot's OPT3001 driver (opt300x) starts a conversion for each read of in_illuminance_input and
+ * sleeps until it is done, ~800 ms, one reader at a time.  Callers under core_lock (settings_available's check, the
+ * states a new subscriber gets) then held it for seconds, and the capture with it: 2.4-5.3 s of the mic lost at each
+ * clock face picked in Home Assistant, whose select waited as long (Master's Spot, 2026-11-06: three threads in
+ * opt3001_read_raw at once, sampled).  The first call reads itself (the start: no reading yet) and starts the thread;
+ * 1 Hz is stock's rate and what proto_esphome's light_thread polls at.  The value as float bits in an atomic. */
+static atomic_uint lux_bits;
+static atomic_int lux_started;
+
+static void *lux_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        sleep(1);
+        float l = lux_read(); unsigned u; memcpy(&u, &l, sizeof u);
+        atomic_store(&lux_bits, u);
+    }
+    return NULL;
+}
+
+float core_lux(void)
+{
+    static pthread_mutex_t first = PTHREAD_MUTEX_INITIALIZER;
+    if (!atomic_load(&lux_started)) {
+        pthread_mutex_lock(&first);
+        if (!atomic_load(&lux_started)) {
+            float l = lux_read(); unsigned u; memcpy(&u, &l, sizeof u);
+            atomic_store(&lux_bits, u);
+            pthread_t t;
+            /* polled wherever the board names a sensor, a first read that failed too (a driver not up yet at boot);
+             * none named: NAN for good, nothing polled */
+            if ((getenv("HASSMIC_LUX") || board.light_sensor[0])
+                && !pthread_create(&t, NULL, lux_thread, NULL)) pthread_detach(t);
+            atomic_store(&lux_started, 1);
+        }
+        pthread_mutex_unlock(&first);
+    }
+    unsigned u = atomic_load(&lux_bits); float l; memcpy(&l, &u, sizeof l);
+    return l;
 }
 
 /* Auto brightness is stock's engine (ledcontroller, above), which only the LED ring has: the Echo Show's band

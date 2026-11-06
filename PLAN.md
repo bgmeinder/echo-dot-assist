@@ -3130,6 +3130,14 @@ Run in this order. Each step says what it proves.
       the same adbd unpatched: their property area is a directory.  On Master (2026-11-06, written with dd from root
       adb, rebooted): `adb devices -l` with product:rook model:AEORK; adb-wifi.sh opened it, `adb connect` a root shell
       in u:r:su:s0 over Wi-Fi; the window ended early (hassmic.adb.until 0): port 0, no listener, connect dropped.
+      The mic deaf for seconds at a setting change (2026-11-06, Master): "capture held up ... 2413-5323 ms" after each
+      clock face picked in HA (the select snapped back meanwhile), 1976 ms after a page change, ~1.3 s at HA's
+      connect.  Sampled every 100 ms (/proc/<tid>/wchan of hassmic's threads, 3 min, faces switched): 234 of 475
+      odd waits in opt3001_read_raw, three threads at once (the HA link's among them), one jbd2 commit.  The opt300x
+      driver starts a conversion per read of in_illuminance_input and sleeps till it is done (~800 ms, readers one at
+      a time), and core_lux() read the file at every call: settings_available's light sensor check (twice) and
+      send_light_states with core_lock held, so each settings walk under the lock waited on it.  core_lux() now hands
+      out the last 1 Hz reading of a thread of its own (lux_thread; the first call reads itself).
       (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
       does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
       HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.

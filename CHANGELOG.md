@@ -4,6 +4,10 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-11-06
 
+- **Echo Spot: no more deaf seconds when a setting changes.** Picking a clock face in Home Assistant (or changing any
+  setting, or Home Assistant connecting) left the Spot unable to hear its wake word for 2 to 5 seconds, and Home
+  Assistant's drop-down jumped back to the old choice for as long. Its light sensor takes most of a second for each
+  reading, and it was read while everything else waited. It is now read once a second on the side.
 - **Echo Spot: adb over Wi-Fi works.** Opening debug access from the settings page (or `scripts/adb-wifi.sh`) said
   it was open, but the Spot never let adb connect: the adb it runs could not read its own settings. The boot image
   now carries a fixed one; a Spot installed before this needs its boot image written again (`scripts/install-boot.sh
