@@ -48,6 +48,7 @@
 #include "improv.h"
 #include "buttons.h"
 #include "ring.h"
+#include "clockface.h"
 #include "ringdesign.h"
 #include "ledq.h"
 #include "screen.h"
@@ -3267,6 +3268,12 @@ int main(int argc, char **argv)
                                                      * default 10 px came up first, and with "Light band" 0 the apps were
                                                      * laid out twice */
       if (!settings_peek("light_band", rows, sizeof rows)) ring_band_rows(atoi(rows)); }
+    { char v[64]; int n;                            /* the round screen's clock as well, the face before the mode: the
+                                                     * wake word models load between here and settings_load, and the
+                                                     * Spot showed the digital clock for 2 s at boot before its face */
+      const char *const *faces = clockface_names(&n);
+      if (!settings_peek("clock_face", v, sizeof v)) for (int i = 0; i < n; i++) if (!strcmp(v, faces[i])) ring_band_face(i);
+      if (!settings_peek("screen_clock", v, sizeof v)) ring_band_clock(!strcmp(v, "24h") ? 1 : !strcmp(v, "12h") ? 2 : 0); }
     ring_start(led_run, ring_reloaded);
     rd_start();                         /* designs asked for before this start: still installing, or back */
     screen_start();                                 /* a model with a screen: its UI process (screen.h) */
