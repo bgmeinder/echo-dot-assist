@@ -96,6 +96,11 @@ const struct board board = {
      * read where it lies (clockface.c); stock's clock app that drew them is Alexa's and stays off */
     .clock_faces = "/system/priv-app/com.amazon.selector.clock.resources/com.amazon.selector.clock.resources.apk",
     .clock_faces_pkg = "com.amazon.selector.clock.resources",
+    /* framework-res's curve (lux 4..60000 -> 50..255, 1 at 0 lux) and dumpsys display's max gamma 10.  Android's
+     * light sensor (MTK's "LIGHT" HAL) read 127-128 lux while the OPT3001's file read 6.39-6.41 (2026-11-06, five
+     * samples): 20 times; Android's own adaptive mode took the backlight to 8 at 0.22 lux with the slider at -0.32,
+     * which this curve gives at 4.4 */
+    .backlight = &(const struct board_backlight){ 20, 10, 7, { 4, 25, 45, 65, 100, 200, 60000 }, { 1, 50, 180, 225, 245, 250, 252, 255 } },
     .volume_steps = 100,                                            /* the light band (ring_band.c) shows the level in % */
     /* The Dot 2's codec family: the HAL's speaker path (audio_device.xml, "Right Channel Only" on) sets
      * "HP Driver Gain Volume" 9, the stock Spot reads 9 9 from tinymix (2026-11-04); verify the control is the

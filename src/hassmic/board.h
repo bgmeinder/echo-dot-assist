@@ -65,6 +65,12 @@ struct board {
     /* the firmware's own clock-face package (clockface.c: Amazon's analog faces, read where it lies) and its package
      * name (the renderer's Resources look its drawables up by it); NULL: none */
     const char *clock_faces, *clock_faces_pkg;
+    /* the screen's adaptive brightness as the firmware's Android computes it (ring_band.c, which then sets the backlight
+     * itself: Android's own mode is left manual): its curve, config_autoBrightnessLevels (lux) and ..LcdBacklightValues
+     * (0..255, one more: level[0] at 0 lux) of framework-res, a monotone cubic spline through (0, level[0]), (lux[i],
+     * level[i + 1]); lux in the units of Android's light sensor, which reads lux_scale times light_sensor's file; and the
+     * slider's gamma range (mScreenAutoBrightnessAdjustmentMaxGamma in dumpsys display).  NULL: no screen brightness */
+    const struct board_backlight { float lux_scale, max_gamma; int n; int lux[12], level[13]; } *backlight;
     int volume_steps;              /* volume_step-NN animations of ledcontroller */
     /* LEDs the light really shows, where that is fewer than stock's animations draw (12): 1 = one RGB LED that shows the
      * first of each frame (the Echo Input's LP5562): nothing turned towards the talker, no LED's own layer (ring.c).

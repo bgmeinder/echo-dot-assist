@@ -275,7 +275,7 @@ host: build/hassmic-host build/hassmic-host-screen $(OUT)/hassmic-qemu build/ota
 UNIT := src/hassmic/hash.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/third_party/monocypher.c
 # One target per test, so make -j unit runs them side by side (tests/run.py does: most of them wait or compile).
 UNIT_TESTS := hash ws noise ble_crypto micgain micend afemeta wordtail wakealign wifimotion spkgain tz statefile ledq micdenoise earsup dha_jwt ca_bundle whisper_voice a2dp_codecs \
-	sbc web_crypto web_tar web_soundpack web_matrix web_loudness ring_pack mww blueprint_dropin buttons buttons_privacy afe_parcel lux ring_band sounds wifictl ringbar volcurve band_map setup_wipe firmware kiosk \
+	sbc web_syntax web_crypto web_tar web_soundpack web_matrix web_loudness ring_pack mww blueprint_dropin buttons buttons_privacy afe_parcel lux ring_band sounds wifictl ringbar volcurve band_map setup_wipe firmware kiosk \
 	screen ui touch json uninstall_boot resample fork_release
 unit: $(addprefix unit-,$(UNIT_TESTS))
 unit-hash:
@@ -345,6 +345,9 @@ unit-a2dp_codecs:
 	cc -O2 -Wall -Isrc/hassmic tests/unit/a2dp_codecs_test.c src/hassmic/a2dp_codecs.c devices/$(DEVICE)/board.c src/hassmic/sbc.c src/third_party/freeaptx.c -lm -ldl -lopus -o build/a2dp_codecs_test && build/a2dp_codecs_test
 unit-sbc:
 	if command -v sbcenc >/dev/null; then tests/unit/sbc_ref.sh; else echo "sbc: sbcenc/sbcdec (package sbc) missing, skipped"; fi
+# every script of the page parses: one quote too many in a help text and the whole page stays blank (2026-11-06)
+unit-web_syntax:
+	if command -v node >/dev/null; then for f in web/*.js; do node --check $$f || exit 1; done; echo "web syntax: ok"; elif [ -n "$$CI" ]; then echo "web syntax: node missing"; exit 1; else echo "web syntax: node missing, skipped"; fi
 unit-web_crypto:
 	if command -v node >/dev/null; then .venv/bin/python tests/unit/web_crypto_test.py; elif [ -n "$$CI" ]; then echo "web crypto: node missing"; exit 1; else echo "web crypto: node missing, skipped"; fi
 unit-kiosk:

@@ -67,7 +67,7 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 
 /* ---------------------------------------------------------------- the table */
 
-enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, STOP_ENDS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, SCREEN_CLOCK, CLOCK_FACE, CLOCK_DIAL, CLOCK_BG, CLOCK_DATE, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WHISPER_REPLY, HEADPHONE_VOL, WAKE_EVENTS, REQUEST_TEXT, WIFI_MOTION, 
+enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, STOP_ENDS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, SCREEN_CLOCK, CLOCK_FACE, CLOCK_DIAL, CLOCK_BG, CLOCK_DATE, SCR_LEVEL, SCR_AUTO, NIGHT, NIGHT_FROM, NIGHT_TO, NIGHT_CLOCK, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WHISPER_REPLY, HEADPHONE_VOL, WAKE_EVENTS, REQUEST_TEXT, WIFI_MOTION, 
           WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT, 
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET, NSET };
@@ -126,6 +126,13 @@ static const struct setting table[NSET] = {
     [CLOCK_DIAL]  = { "clock_dial", "Clock dial", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
     [CLOCK_BG]    = { "clock_background", "Clock background", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
     [CLOCK_DATE]  = { "clock_date", "Date on the clock face", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* ring_band.c (ring_band_screen): the round screen's backlight and its night, stock's Display and Night Mode */
+    [SCR_LEVEL]   = { "screen_brightness", "Screen brightness", "Lights", "%", S_INT, 0, 100, 1, 0 },
+    [SCR_AUTO]    = { "screen_adaptive_brightness", "Adaptive brightness", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
+    [NIGHT]       = { "night_mode", "Night mode", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [NIGHT_FROM]  = { "night_from", "Night starts", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [NIGHT_TO]    = { "night_to", "Night ends", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [NIGHT_CLOCK] = { "night_clock", "Night clock", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
     [ARB]         = { "arbitration", "Wake word arbitration with other Echos", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     /* arb.c keeps them in memory, state/config on disk: lockdown.sh admits Kiosk Satellite's port by it */
     [ARB_MODE]    = { "arbitration_mode", "Arbitration mode", "Features", NULL, S_CHOICE, 0, 0, 1, 0 },
@@ -214,6 +221,9 @@ static int present(enum id i)
     case SCREEN_CLOCK: return ring_band_rows(-1) >= 0 && board.screen_round;   /* the renderer's text: the round screen's */
     case CLOCK_FACE: case CLOCK_DIAL: case CLOCK_BG: case CLOCK_DATE:
         return ring_band_rows(-1) >= 0 && board.screen_round && clockface_count() > 0;
+    case SCR_LEVEL: case NIGHT_CLOCK: return board.screen_round && ring_band_has_backlight();   /* the screen off: the same calls */
+    case SCR_AUTO: return board.screen_round && ring_band_has_backlight() && core_lux() == core_lux();
+    case NIGHT: case NIGHT_FROM: case NIGHT_TO: return ring_band_rows(-1) >= 0 && board.screen_round;
     case KIOSK_NET: case KIOSK_MIC: case KIOSK_CAM: return board.kiosk;
     case RING_ROT: return ring_band_rows(-1) < 0;                 /* LEDs to turn: the Dots' ring, not the band */
     default: return 1;
@@ -239,11 +249,21 @@ int settings_max(const struct setting *s)
 }
 
 static const char *const clock_modes[] = { "off", "24h", "12h" };
+static const char *const night_modes[] = { "off", "automatic", "scheduled" };
+/* the night's start and end by the half hour, "00:00".."23:30" (ring_band_screen's 0..47) */
+static const char *const *half_hours(void)
+{
+    static char text[48][6]; static const char *names[48];
+    if (!names[0]) for (int i = 0; i < 48; i++) { snprintf(text[i], sizeof text[i], "%02d:%02d", i / 2, i % 2 * 30); names[i] = text[i]; }
+    return names;
+}
 
 int settings_choices(const struct setting *s, const char *const **names)
 {
     switch (s - table) {
     case SCREEN_CLOCK: *names = clock_modes; return 3;
+    case NIGHT: *names = night_modes; return 3;
+    case NIGHT_FROM: case NIGHT_TO: *names = half_hours(); return 48;
     case CLOCK_FACE: { int n; *names = clockface_names(&n); return n; }
     /* the face's own: none on the digital clock (the page shows the row empty, Home Assistant does not list it) */
     case CLOCK_DIAL: case CLOCK_BG: {
@@ -344,6 +364,8 @@ int settings_get(const struct setting *s)
     case CLOCK_DIAL: return ring_band_dial(-2);
     case CLOCK_BG: return ring_band_background(-2);
     case CLOCK_DATE: return ring_band_date(-1);
+    case SCR_LEVEL: case SCR_AUTO: case NIGHT: case NIGHT_FROM: case NIGHT_TO: case NIGHT_CLOCK:
+        return ring_band_screen(SCR_BRIGHTNESS + (int)(s - table - SCR_LEVEL), -1);
     default: return 0;
     }
 }
@@ -415,6 +437,8 @@ static void put(enum id i, int v)
     case CLOCK_DIAL: ring_band_dial(v); break;
     case CLOCK_BG: ring_band_background(v); break;
     case CLOCK_DATE: ring_band_date(v); break;
+    case SCR_LEVEL: case SCR_AUTO: case NIGHT: case NIGHT_FROM: case NIGHT_TO: case NIGHT_CLOCK:
+        ring_band_screen(SCR_BRIGHTNESS + (i - SCR_LEVEL), v); break;
     default: break;
     }
 }

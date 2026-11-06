@@ -4,6 +4,14 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-11-06
 
+- **Echo Spot: screen brightness and night mode, as stock's settings had them.** "Adaptive brightness" and "Screen
+  brightness" (settings page, Lights, Screen; also in Home Assistant) set the backlight: adaptive follows the room by
+  the Spot's light sensor on Amazon's own curve (dim in the dark, full in daylight), and the slider makes it brighter
+  or dimmer than the room asks; off, the slider is the level. "Night mode" (Automatic: a dark room; Scheduled: the
+  hours you set; Off) decides when it is night: the clock faces show their night version and the screen dims, or
+  with "Night clock" off the screen goes dark for the night and lights up only while the Echo shows something.
+- **Echo Spot: the settings page works again.** The words added for the clock faces had a quote too many, and the page
+  stayed blank on every Echo running the clock face update.
 - **Echo Spot: every dial, background and the date on the clock faces.** Each of the Spot's analog faces comes with
   its own dials and backgrounds; until now hassmic showed each design's default only. "Clock dial" and "Clock
   background" (settings page, Lights, the backgrounds by their pictures; and selects in Home Assistant) pick among the

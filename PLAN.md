@@ -3124,6 +3124,29 @@ Run in this order. Each step says what it proves.
       centred at (a >> 16, a & 0xffff) when a >= 65536 (kind 2 too).  The page: backgrounds by their styled_background
       (bg_home_*, the home screen's picture of each; GET /api/clockface/<n>/bg/<k>), dials by name; it rebuilds when a
       setting's choices change (render()'s sig).
+      Screen brightness and night (2026-11-06): stock's Display ("Adaptive Brightness", the slider) and Night Mode
+      (KnightSettings clock_nighttime_mode_settings: enable_night_mode, night_mode_scheduled / _automatic "based on
+      available light", night_time_clock_mode "Show a dim clock, instead of turning off the screen").  Settings
+      screen_brightness, screen_adaptive_brightness, night_mode (off/automatic/scheduled), night_from, night_to (half
+      hours), night_clock; ring_band.c screen_tick, once a second on the band thread.  The backlight: Android 5.1 refuses
+      settings writes to hassmic's uid 1000 ("null from uid 1000 not allowed to perform WRITE_SETTINGS"; shell's uid
+      may, root may), but IPowerManager transaction 20 (setTemporaryScreenBrightnessSettingOverride) works from uid
+      1000 and takes effect at once (sysfs 10 within a second), only in manual mode (in adaptive it was ignored);
+      21 (the adjustment override, a float as i32 bits) works in adaptive mode.  So device.conf sets
+      screen_brightness_mode=0 and hassmic is the adaptive mode: framework-res's config_autoBrightnessLevels
+      {4,25,45,65,100,200,60000} / LcdBacklightValues {1,50,180,225,245,250,252,255}, Android's MonotoneCubicSpline
+      (its tangents equal dumpsys display's), gamma 10^-adj (dumpsys: max gamma 10.0), Android's light sensor in whole
+      lux at 20 x the OPT3001's file (127-128 against 6.39-6.41, five samples).  Checked against Android's own on
+      Lucas's Spot: adjustment -0.32 gave 8 at 0.22 lux (4 of Android's) and 247 at 118-128; ours 8 and 245-247
+      (tests/unit/ring_band_test.c).  Debounce as AutomaticBrightnessController's (+10 % for 4 s, -20 % for 8 s); the
+      override sent again each minute (system_server keeps it only in memory).  Night: by board.lux_dark (automatic) or
+      the hours; the night clock caps the level at 16; without it, goToSleep (transaction 10: long time as two i32,
+      reason, flags; Asleep in dumpsys power) once no pattern shows for 10 s, the clock's keep-awake held off.
+      Measured on Master (2026-11-06): backlight 246 adaptive at 3.35 lux, a scheduled night 16 within a second and
+      the night images; night clock off: asleep 8 s later.  Not yet: a pattern waking it at night by the wake word
+      (the same screen_wake as before), and Shows (other transaction numbers: ring_band_has_backlight 0 there).
+      The settings page was blank from 60a8b7e: help texts of the clock settings with ASCII apostrophes in single
+      quotes.  unit-web_syntax (node --check web/*.js) now in make unit.
       To do: rook's lux in true lux.  The OPT3001 behind the dark glass reads some 1/100-1/1000 of the room's light,
       so HA's Illuminance is not comparable with other sensors.  A scale factor (a board field multiplying what
       core_lux reads, lux_dark then on the true scale) from one reading beside a reference (a phone's light meter on

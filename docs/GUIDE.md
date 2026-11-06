@@ -432,11 +432,18 @@ Beyond the README's two figures:
   ten, each shown by its picture: Beach's Ocean, Grass, Leaves, Sand, Flower), and "Date on the clock face" shows the
   day of the month in the face's date window, where it has one; all three are in Home Assistant too (the dial and
   background selects list the face's own, so picking another face makes Home Assistant read the Echo's entities
-  again, which takes a few seconds). A new face starts at its own default dial and background. The screen's brightness follows the
-  room too (Android's own auto brightness on that sensor, as on a stock Spot). hassmic draws them from the
+  again, which takes a few seconds). A new face starts at its own default dial and background. hassmic draws them from the
   firmware's own clock-face package where it lies: nothing is downloaded or copied, and Alexa's clock app stays off.
-  Notifications, the date window and Alexa's alerts on the faces are left out, and so are Photos and the four
+  Notifications and Alexa's alerts on the faces are left out, and so are Photos and the four
   Wallpaper designs: their pictures came from Amazon's online services.
+  The screen's brightness and night are stock's Display and Night Mode settings (Lights, cards Screen and Night; all
+  in Home Assistant too). "Adaptive brightness" (on by default) follows the room by the light sensor, on the curve
+  Amazon made for the Spot, a few seconds after the light changes; "Screen brightness" is then how much brighter or
+  dimmer than that (50 % is Amazon's curve itself), or with adaptive off the level itself. "Night mode": Automatic
+  (default) makes it night while the room is dark, Scheduled between "Night starts" and "Night ends" (half hours,
+  21:00 to 07:00 to begin with; Automatic uses them too where the light sensor reads nothing), Off never. At night
+  the faces show their night version and, with "Night clock" on (default), the screen dims to a low glow; with it
+  off the screen goes dark, lights up for the wake word, a reply or a timer, and goes dark again 10 seconds after.
   The volume of voice replies shows in cyan, as on the Dots. The screen wakes for the band and sleeps 5 minutes after the last light (1 minute with
   the microphones off or in Do not disturb).
 - **Microphone off** plays Alexa's own sounds. A switch that is already off when hassmic starts is shown, not announced.

@@ -131,7 +131,8 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_TIMER_RINGING, KEY_TIMER_NAMES, KEY_DROPIN_SERVICE, KEY_DROPIN_STATE, KEY_DROPIN_PEER, KEY_DROPIN_END, KEY_RESTART,
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
        KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_LAST_HEARD, KEY_LAST_REPLY, KEY_CLOCK_FACE,
-       KEY_CLOCK_DIAL, KEY_CLOCK_BG, KEY_CLOCK_DATE };
+       KEY_CLOCK_DIAL, KEY_CLOCK_BG, KEY_CLOCK_DATE, KEY_SCREEN_BRIGHTNESS, KEY_SCREEN_ADAPTIVE, KEY_NIGHT_MODE, KEY_NIGHT_FROM,
+       KEY_NIGHT_TO, KEY_NIGHT_CLOCK };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -384,6 +385,17 @@ static void part_label(const char *name, char *out, size_t cap)
     out[0] = (char)toupper((unsigned char)out[0]);
 }
 
+/* The round screen's backlight and night (ring_band.c): settings of settings.c's table, each an entity named as there,
+ * key order = the table's (KEY_SCREEN_BRIGHTNESS..KEY_NIGHT_CLOCK); a select's options its choices, the night mode's
+ * capitalised ("Automatic"), the times as they are ("22:00") */
+static const char *const screen_names[] = { "screen_brightness", "screen_adaptive_brightness", "night_mode", "night_from",
+                                            "night_to", "night_clock" };
+static const struct setting *screen_setting(int key)
+{
+    return key >= KEY_SCREEN_BRIGHTNESS && key <= KEY_NIGHT_CLOCK ? settings_find(screen_names[key - KEY_SCREEN_BRIGHTNESS]) : NULL;
+}
+static void choice_label(const char *name, char *out, size_t cap) { part_label(name, out, cap); }
+
 static void send_setting(int key)       /* lock held */
 {
     if (!listed(key)) return;
@@ -406,6 +418,15 @@ static void send_setting(int key)       /* lock held */
         part_label(p[v], l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); break;
     }
     case KEY_CLOCK_DATE: pb_uint(&b, 2, ring_band_date(-1)); send_state(SWITCH_STATE, &b); break;
+    case KEY_SCREEN_BRIGHTNESS: case KEY_SCREEN_ADAPTIVE: case KEY_NIGHT_MODE: case KEY_NIGHT_FROM: case KEY_NIGHT_TO: case KEY_NIGHT_CLOCK: {
+        const struct setting *st = screen_setting(key);
+        int v = settings_get(st);
+        if (st->type == S_INT) { pb_float(&b, 2, (float)v); send_state(NUMBER_STATE, &b); }
+        else if (st->type == S_BOOL) { pb_uint(&b, 2, v != 0); send_state(SWITCH_STATE, &b); }
+        else { const char *const *c; int n = settings_choices(st, &c); char l[24];
+               if (v >= 0 && v < n) { choice_label(c[v], l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); } }
+        break;
+    }
     case KEY_EQ_BASS: case KEY_EQ_MID: case KEY_EQ_TREBLE: pb_float(&b, 2, core_eq(key - KEY_EQ_BASS)); send_state(NUMBER_STATE, &b); break;
     case KEY_ARB_JOIN: if (arb_running()) { pb_uint(&b, 2, arb_arbitrate(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_ARB_PEERS: if (arb_running()) { pb_float(&b, 2, arb_peers()); send_state(SENSOR_STATE, &b); } break;
@@ -532,6 +553,7 @@ static void send_light_states(void)     /* lock held */
     send_setting(KEY_LED_AUTO); send_setting(KEY_LED_BRIGHTNESS); send_setting(KEY_LIGHT);
     send_setting(KEY_RING_FILL); send_setting(KEY_RING_ROTATION); send_setting(KEY_CLOCK_FACE);
     send_setting(KEY_CLOCK_DIAL); send_setting(KEY_CLOCK_BG); send_setting(KEY_CLOCK_DATE);
+    for (int k = KEY_SCREEN_BRIGHTNESS; k <= KEY_NIGHT_CLOCK; k++) send_setting(k);
 }
 
 static void send_light_entities(void)
@@ -573,6 +595,24 @@ static void send_light_entities(void)
     }
     if (listed(KEY_CLOCK_DATE)) { PB(b, 160); pb_str(&b, 1, "clock_date"); pb_fixed32(&b, 2, KEY_CLOCK_DATE);
       pb_str(&b, 3, "Date on the clock face"); pb_str(&b, 5, "mdi:calendar-today"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    /* the round screen's backlight and night (ring_band.c), as stock's Display and Night Mode settings */
+    static const char *const screen_icons[] = { "mdi:brightness-5", "mdi:brightness-auto", "mdi:weather-night",
+                                                "mdi:clock-start", "mdi:clock-end", "mdi:clock-outline" };
+    for (int k = KEY_SCREEN_BRIGHTNESS; k <= KEY_NIGHT_CLOCK; k++) {
+        const struct setting *st = screen_setting(k);
+        if (!listed(k)) continue;
+        PB(b, 1024);
+        pb_str(&b, 1, st->name); pb_fixed32(&b, 2, k); pb_str(&b, 3, st->label); pb_str(&b, 5, screen_icons[k - KEY_SCREEN_BRIGHTNESS]);
+        if (st->type == S_INT) {
+            pb_float(&b, 6, st->min); pb_float(&b, 7, st->max); pb_float(&b, 8, 1); pb_uint(&b, 10, 1);
+            pb_str(&b, 11, "%"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b);
+        } else if (st->type == S_BOOL) { pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+        else {
+            const char *const *c; int n = settings_choices(st, &c); char l[24];
+            for (int i = 0; i < n; i++) { choice_label(c[i], l, sizeof l); pb_str(&b, 6, l); }
+            pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b);
+        }
+    }
     if (listed(KEY_LUX)) { PB(b, 192); pb_str(&b, 1, "illuminance"); pb_fixed32(&b, 2, KEY_LUX); pb_str(&b, 3, "Illuminance"); pb_str(&b, 6, "lx");
           pb_uint(&b, 7, 0); pb_str(&b, 9, "illuminance"); pb_uint(&b, 10, 1); send_msg(LIST_SENSOR, &b); }
     if (have_auto) {
@@ -620,6 +660,8 @@ static int listed(int key)
     case KEY_CLOCK_FACE: return settings_find("clock_face") != NULL;
     case KEY_CLOCK_DIAL: case KEY_CLOCK_BG: case KEY_CLOCK_DATE:
         return settings_find("clock_face") != NULL && ring_band_face(-1) > 0;
+    case KEY_SCREEN_BRIGHTNESS: case KEY_SCREEN_ADAPTIVE: case KEY_NIGHT_MODE: case KEY_NIGHT_FROM: case KEY_NIGHT_TO: case KEY_NIGHT_CLOCK:
+        return screen_setting(key) != NULL;
     case KEY_CALL_VOLUME: if (!(dropin_running() && settings_on("drop_in"))) return 0;    /* calls only with Drop In */
         /* fall through */
     case KEY_ASSIST_VOLUME: case KEY_SOUNDS_VOLUME: case KEY_TIMER_VOLUME:       /* one that follows the music has none */
@@ -776,6 +818,17 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
             part_label(p[i], l, sizeof l);
             if (!strcmp(opt, l)) { settings_set(key == KEY_CLOCK_DIAL ? "clock_dial" : "clock_background", p[i], e, sizeof e); return; }
         }
+        return;
+    }
+    else if (key >= KEY_SCREEN_BRIGHTNESS && key <= KEY_NIGHT_CLOCK && listed(key)) {      /* saved, shown: settings.c */
+        const struct setting *st = screen_setting(key); char v[24] = "", e[80];
+        if (type == NUMBER_COMMAND && st->type == S_INT) snprintf(v, sizeof v, "%d", num < st->min ? st->min : num > st->max ? st->max : (int)lroundf(num));
+        else if (type == SWITCH_COMMAND && st->type == S_BOOL) snprintf(v, sizeof v, "%s", on ? "on" : "off");
+        else if (type == SELECT_COMMAND && st->type == S_CHOICE) {
+            const char *const *c; int n = settings_choices(st, &c); char l[24];
+            for (int i = 0; i < n; i++) { choice_label(c[i], l, sizeof l); if (!strcmp(opt, l)) snprintf(v, sizeof v, "%s", c[i]); }
+        }
+        if (v[0]) settings_set(st->name, v, e, sizeof e);
         return;
     }
     else if (type == SWITCH_COMMAND && key == KEY_CLOCK_DATE && listed(key)) { char e[80]; settings_set("clock_date", on ? "on" : "off", e, sizeof e); return; }

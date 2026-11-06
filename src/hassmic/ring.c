@@ -1108,6 +1108,10 @@ int  ring_band_face(int set) { (void)set; return 0; }
 int  ring_band_dial(int set) { (void)set; return 0; }
 int  ring_band_background(int set) { (void)set; return 0; }
 int  ring_band_date(int set) { (void)set; return 0; }
+int  ring_band_screen(int what, int set) { (void)what; (void)set; return 0; }
+void ring_band_screen_ready(void) {}
+int  ring_band_has_backlight(void) { return 0; }
+int  ring_backlight_level(float lux, int pct, int adaptive) { (void)lux; (void)pct; (void)adaptive; return 0; }
 
 void ring_light_set(const struct ring_light *l, unsigned flash_ms)
 {

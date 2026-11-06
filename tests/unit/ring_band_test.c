@@ -15,7 +15,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-const struct board board = { .volume_steps = 100 };
+/* the Echo Spot's backlight curve (devices/rook/board.c): the screen's adaptive brightness against Android's own */
+const struct board board = { .volume_steps = 100,
+    .backlight = &(const struct board_backlight){ 20, 10, 7, { 4, 25, 45, 65, 100, 200, 60000 }, { 1, 50, 180, 225, 245, 250, 252, 255 } } };
 static int muted, dnd_on, spawns_wake, spawns_timeout, last_timeout;
 int core_muted(void) { return muted; }
 int core_dnd(int set) { (void)set; return dnd_on; }
@@ -99,6 +101,17 @@ static int again(const char *st)
 int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "again")) return again(argv[2]);
+    {   /* the backlight as the Spot's own Android set it (dumpsys display, 2026-11-06): its slider at -0.32 = 34 %, 8 at
+         * 0.22 lux of the OPT3001 and 247 at 6.4 (118-128 of Android's); fixed: 1..255 over the slider */
+        int a = ring_backlight_level(0.22f, 34, 1), b = ring_backlight_level(6.4f, 34, 1);
+        check(a >= 7 && a <= 9, "backlight: 8 at 0.22 lux, slider at Android's -0.32");
+        check(b >= 244 && b <= 249, "backlight: 247 at 6.4 lux");
+        check(ring_backlight_level(0, 50, 1) == 1, "backlight: 1 in the dark, the curve's own");
+        check(ring_backlight_level(0.22f, 100, 1) > ring_backlight_level(0.22f, 50, 1), "backlight: the slider brightens the curve");
+        check(ring_backlight_level(-1, 30, 1) == ring_backlight_level(-1, 30, 0), "backlight: no reading, the slider's own level");
+        check(ring_backlight_level(5, 0, 0) == 1 && ring_backlight_level(5, 100, 0) == 255 && ring_backlight_level(5, 50, 0) == 128,
+              "backlight: fixed, 1..255");
+    }
     char dir[] = "/tmp/ring_band_XXXXXX", script[300];
     if (!mkdtemp(dir)) return 1;
     band_in(dir, script, sizeof script);

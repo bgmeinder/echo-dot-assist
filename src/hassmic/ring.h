@@ -82,6 +82,17 @@ int  ring_band_face(int set);
 int  ring_band_dial(int set);
 int  ring_band_background(int set);
 int  ring_band_date(int set);
+/* the round screen's backlight and night (ring_band.c, stock's Display and Night Mode): SCR_BRIGHTNESS 0..100 %,
+ * SCR_ADAPTIVE 0/1 (by the light sensor; the brightness then shifts the curve, 50 = the firmware's own), SCR_NIGHT 0 off,
+ * 1 automatic (a dark room; the hours where there is no sensor), 2 scheduled, SCR_NIGHT_FROM / _TO half hours of the day
+ * 0..47, SCR_NIGHT_CLOCK 1 a dim clock at night, 0 the screen off.  set < 0 reads.  ring_band_screen_ready: settings
+ * loaded, nothing applied before.  ring_band_has_backlight: whether this model's backlight can be set (Android 5.1's
+ * transactions).  ring_backlight_level: the backlight 1..255 for lux (< 0: none), slider and adaptive, for tests */
+enum { SCR_BRIGHTNESS, SCR_ADAPTIVE, SCR_NIGHT, SCR_NIGHT_FROM, SCR_NIGHT_TO, SCR_NIGHT_CLOCK, SCR_COUNT };
+int  ring_band_screen(int what, int set);
+void ring_band_screen_ready(void);
+int  ring_band_has_backlight(void);
+int  ring_backlight_level(float lux, int pct, int adaptive);
 /* what plays, from Sendspin: shown on a round screen in place of the clock while it plays (ring_band.c); the cover a
  * JPEG, n 0 none.  ring_shows_music: whether this model shows it (Sendspin then asks for metadata and artwork) */
 int  ring_shows_music(void);
