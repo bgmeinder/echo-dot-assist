@@ -33,6 +33,7 @@
 #include "board.h"
 #include "core.h"
 #include "fwcurl.h"
+#include "https.h"
 #include "net.h"
 #include "ota.h"
 #include "plugin.h"
@@ -133,6 +134,7 @@ static int fetch(const char *url, struct buf *b, size_t max, int progress, long 
     struct curl_slist *hl = NULL;
     curl->setopt(h, OPT_URL, url);
     curl->setopt(h, OPT_USERAGENT, ua);
+    https_ca_set(h, curl->setopt);                        /* a store that exists (https.c says why) */
     /* The first address may be plain HTTP (the tests' stand-ins; a site a fork names), a redirect only HTTPS: one to
      * HTTP took whatever answered there for GitHub's (a review, 2026-11-21; the lists and the bundles are signed, but
      * a package's bytes, the API's answer and what the page shows were not to come from anyone on the way).  GitHub's

@@ -27,6 +27,7 @@
 #include "davs.h"
 #include "artifacts.h"
 #include "core.h"
+#include "https.h"
 #include "dha.h"
 #include "hash.h"
 #include "net.h"
@@ -153,6 +154,7 @@ static size_t on_file(char *d, size_t size, size_t n, void *arg)
 static void curl_common(void *h)
 {
     curl->setopt(h, OPT_USERAGENT, "hassmic");
+    https_ca_set(h, curl->setopt);                        /* a store that exists (https.c says why) */
     curl->setopt(h, OPT_PROTOCOLS, (long)PROTO_HTTP_S); curl->setopt(h, OPT_REDIR_PROTOCOLS, (long)PROTO_HTTP_S);
     curl->setopt(h, OPT_FOLLOWLOCATION, 1L); curl->setopt(h, OPT_MAXREDIRS, 3L);
     curl->setopt(h, OPT_FAILONERROR, 0L);                       /* the answers' bodies say more than their codes */

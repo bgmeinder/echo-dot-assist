@@ -1115,6 +1115,11 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   on 5 GHz it does not.
 - **Bluetooth music from phones on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry
   every few seconds where its packets arrive unevenly: the phone's clock is measured, not summed.
+- **HTTPS replies on every model, the certificates in one place.** Replies and announcements from a Home Assistant
+  that serves HTTPS were refused on the Echo Spot although its firmware trusts Let's Encrypt: Amazon's libcurl looks for
+  its certificates in a Linux file the Echo does not have. hassmic now gathers the Echo's own store and Let's Encrypt's
+  two roots into one file (`cacerts.pem` next to the binary) and checks HTTPS against that, so "Check HTTPS
+  certificates" can stay on everywhere. Certificates of eMudhra are left out on every model.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 
