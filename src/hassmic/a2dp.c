@@ -672,6 +672,14 @@ static void set_streaming(int on)
 {
     if (atomic_exchange(&streaming, on) == on) return;
     fprintf(stderr, "a2dp: %s\n", on ? "streaming" : "stream stopped");
+    /* A Broadcom controller (one we load a patch into: rook's BCM43569) shares its antenna with the chip's Wi-Fi and
+     * favours a link only when told: Android's stack sends Set_ACL_Priority (vendor 0xFC57: handle, 0xFF high / 0x00
+     * normal) when A2DP starts and stops (bluedroid l2c_utils.c, HCI_BRCM_SET_ACL_PRIORITY).  Without it a phone's
+     * aptX reached the Spot at 43-48k frames/s of 48k beside Wi-Fi, whole but short, skipping (2026-11-06) */
+    if (board.bt_patch && av.l) {
+        unsigned char d[3]; put16(d, av.l->handle); d[2] = on ? 0xff : 0x00;
+        later(0xfc57, d, 3);
+    }
     core_music(MUSIC_BLUETOOTH, on);
 }
 

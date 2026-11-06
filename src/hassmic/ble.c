@@ -53,6 +53,7 @@
 #endif
 #include "ble.h"
 #include "board.h"
+#include "bt_uart.h"
 #include "core.h"
 #include "ble_crypto.h"
 #include "hci.h"
@@ -1145,6 +1146,23 @@ static int cmd(unsigned op, const void *par, unsigned n)
 
 /* HASSMIC_BT_DEV: another controller, for tests (tests/fake_improv.py plays one on a pseudo terminal) */
 static const char *bt_dev(void) { const char *e = getenv("HASSMIC_BT_DEV"); return e && *e ? e : board.bt_dev; }
+/* the device node itself, "uart:" taken off */
+static const char *bt_path(void) { const char *d = bt_dev(); return d && !strncmp(d, "uart:", 5) ? d + 5 : d; }
+
+/* the controller opened: a character device as it is, or a UART set up with its patch (bt_uart.c) */
+static int bt_open(void)
+{
+    const char *d = bt_dev();
+    if (!d || strncmp(d, "uart:", 5)) return open(d, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    uint8_t a[6], *ap = NULL; char h[16] = ""; unsigned x[6];
+    FILE *f = board.bt_mac ? fopen(board.bt_mac, "r") : NULL;
+    if (f) { if (fscanf(f, "%12s", h) != 1) h[0] = 0; fclose(f); }
+    if (strlen(h) == 12 && sscanf(h, "%2x%2x%2x%2x%2x%2x", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5]) == 6) {
+        for (int i = 0; i < 6; i++) a[i] = (uint8_t)x[i];
+        ap = a;
+    }
+    return bt_uart_open(d + 5, board.bt_patch, board.bt_baud ? board.bt_baud : 115200, ap);
+}
 
 static int stock_bt_running(void)
 {
@@ -1366,7 +1384,7 @@ static void *thread(void *arg)
     (void)arg;
     for (int said = 0;; sleep(5)) {
         if (stock_bt_running()) { if (!said++) fprintf(stderr, "bluetooth: waiting for %s to stop\n", board.bt_service); continue; }
-        if ((fd = open(bt_dev(), O_RDWR | O_NOCTTY | O_CLOEXEC)) < 0) { if (!said++) fprintf(stderr, "bluetooth: %s: %s\n", bt_dev(), strerror(errno)); continue; }
+        if ((fd = bt_open()) < 0) { if (!said++) fprintf(stderr, "bluetooth: %s: %s\n", bt_dev(), strerror(errno)); continue; }
         /* Left unread by the previous user.  A hassmic that was killed while scanning leaves the chip scanning, so this
          * does not run dry: stop after a moment, the reset stops the flow and pump() finds the packet boundaries again. */
         struct timespec t0; now(&t0);
@@ -1417,7 +1435,7 @@ static void *thread(void *arg)
 
 /* -B leaves the radio to the stock stack: then nothing of ours may show (radar installs with -B; its "Bluetooth pairing"
  * switch was listed and fell back off at once, as no thread ever took the request) */
-int ble_present(void) { return core_bluetooth(-1) && access(bt_dev(), F_OK) == 0; }
+int ble_present(void) { return core_bluetooth(-1) && access(bt_path(), F_OK) == 0; }
 const char *ble_mac(void) { return bdaddr; }
 int ble_scanning(void) { return atomic_load(&scanning); }
 

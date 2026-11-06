@@ -2427,6 +2427,15 @@ Run in this order. Each step says what it proves.
       CA-signed certificate, self-signed refused, taken with the setting off (persisted), unreachable reports failure.
       Device (biscuit, 2026-10-13, announcements over its ESPHome API): raw.githubusercontent.com MP3 with checks on
       played; a self-signed server refused (curl 60), played with `https_verify=off`.  Open: a real HA over HTTPS.
+- [x] Bluetooth on a UART (rook, 2026-11-05).  The Spot's BCM43569 sits on /dev/ttyMT1 (bluetooth:radio 0660; the
+      kernel has no Bluetooth stack), unpatched it answers nothing useful.  bt_uart.c (board bt_dev "uart:<tty>",
+      bt_patch, bt_baud, bt_mac) does libbt-vendor's sequence: 115200 RTS/CTS, HCI_Reset, Update_Baudrate 0xFC18 to
+      3 Mbaud (a reset there proves it), Download_Minidriver 0xFC2E, the .hcd's 307 records as HCI commands (Launch_RAM
+      0xFC4E may go unanswered), 200 ms, 115200, reset, baud again, Write_BD_ADDR 0xFC01 from idme; then ble.c's H4.
+      Nothing powers the chip down when hassmic restarts (rfkill0 is root's): it answers only at 3 Mbaud, patched, so a
+      reset unanswered at 115200 is tried there and only the address is set.  Device: "controller ready,
+      <address>, ACL 15 x 251", scanning, HA lists the adapter; two restarts in a row came back.  Not tried:
+      A2DP source over it, Improv.
 - [x] Bluetooth audio from phones: the source's clock measured, not summed (2026-11-06).  A Pixel's music skipped on
       the Echo Spot; besides the radio (below), a2dp.c's player.
       hassmic's estimate of the phone's clock summed the buffer's error and ran away to its 1 % limit (the buffer

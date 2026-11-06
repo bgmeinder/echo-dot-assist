@@ -30,10 +30,14 @@ struct board {
                                        its gpio-privacy holds the enable line 1 s, then changes state); NULL: no early notice */
     int privacy_settle_ms;          /* with privacy_button: how long a press is believed before the latch must have confirmed it */
 
-    /* Bluetooth: raw HCI (H4) character device, the init service that owns it in stock, where the address is stored */
+    /* Bluetooth: raw HCI (H4) character device, the init service that owns it in stock, where the address is stored.
+     * "uart:<tty>": a controller on a UART instead (rook's Broadcom), set up by bt_uart.c with bt_patch (its firmware
+     * patch, .hcd) at bt_baud, the address from bt_mac written into it */
     const char *bt_dev;
     const char *bt_service;
     const char *bt_mac;
+    const char *bt_patch;
+    int bt_baud;
     /* the most a phone's codec may send, kbit/s (0: no limit): codecs above it are not offered, the phone takes AAC or
      * SBC.  rook: its Broadcom chip's Bluetooth gets ~50 KB/s beside Wi-Fi on the one antenna, aptX at 48 kHz needs
      * 384 kbit/s + headers (~49.5 KB/s) and ran dry every few seconds; aptX HD (576) every second (2026-11-05/06) */
