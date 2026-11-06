@@ -3087,6 +3087,22 @@ Run in this order. Each step says what it proves.
       which now also builds send_table's table), roundImage for tiles and the designer's stage, roundCellAt for
       painting, conic thumbnails; the designer's switch reads "Screen" on a round Echo.  The build image has nodejs
       now (band_map_test, the other page tests, in the container).
+      Analog clock faces (2026-11-06, setting clock_face): the firmware's com.amazon.selector.clock.resources.apk
+      (67 MB; sysinstall moves it to /system/hassmic-removed with the other Alexa apps, clockface.c reads it there as
+      sounds.c does) holds Amazon's faces as deflated JSON under assets/raw: clock_template_<id> (face and background
+      ids, the default of each), clock_face_<id> (is_analog; ImageLayer, RotatingHandLayer HOUR_12/HOUR_24/MINUTE/SECOND,
+      MaskedRotatingHandLayer, DateWindowLayer, complications, TextClockLayer; day_/night_ src and colour, center_x/y
+      on a 480 face) and clock_background_<id>; the art is the package's drawables (PNGs and binary-XML layer-lists),
+      thumbnails res/drawable/img_list_clockface_<id>.png.  27 templates with an analog face, 328 parts, every
+      drawable present; 22 offered: photos and wallpaper_{art,nature,seasonal,travel} name a photo_provider (ZORDON,
+      CURATIONS_*), backgrounds from Amazon's services, left out.  clockface.c (zip central directory, inflate; tests/unit/clockface_test.py on a package of its
+      own) turns template + time into parts; ringbar.dex's ring mode draws them by name through Resources over its own
+      AssetManager (kinds 7 path, 8 package, 6 cleared, 4 a part rotated about the centre / tinted SRC_IN / centred at
+      its intrinsic size or filling, 5 shown; tests/unit/ringbar_run.py), so layer-lists and densities are Android's own.
+      ring_band.c draws once a second (the wait ends just past the next second), night 21:00-07:00 or by the light
+      sensor (rook has none).  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (28 options)
+      switches within a second; screenshots of Abstract shapes and Beach at night (2026-11-06).  Not yet: the faces by
+      day seen on the device, a template's other faces and backgrounds (clockface_styles/colors exist, no setting).
       (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
       does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
       HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.

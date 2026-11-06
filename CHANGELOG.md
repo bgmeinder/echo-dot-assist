@@ -2,6 +2,15 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-11-06
+
+- **Echo Spot: its own analog clock faces.** "Clock face" (settings page, Lights, with a picture of each; and a select
+  in Home Assistant) puts one of the Spot's 22 analog faces from Alexa's clock in place of the digital clock: its
+  background, its dial and its hands, the second hand ticking, and the dimmed night version from 21:00 to 07:00. The
+  faces are read from the Spot's own firmware; nothing is downloaded and Alexa stays off (the designs whose pictures
+  came from Amazon's online photos are left out). "Digital" keeps hassmic's
+  clock. "Clock on the screen" must be on for either.
+
 ## 2026-11-05
 
 - **Echo Dot 3: the unlock can leave the Echo unusable; the setup now warns before it.** On two Echo Dot 3s the

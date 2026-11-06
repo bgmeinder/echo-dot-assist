@@ -327,6 +327,10 @@ class Dex:
                 a, b = r[o[1]], r[o[2]]
                 r[o[0]] = i32({0x90: a + b, 0x91: a - b, 0x92: a * b, 0x95: a & b, 0x96: a | b,
                                0x98: a << (b & 31)}[op])
+            elif op == 0x93:                                    # div-int: Java's, towards 0
+                a, b = r[o[1]], r[o[2]]
+                q = abs(a) // abs(b)
+                r[o[0]] = i32(q if (a < 0) == (b < 0) else -q)
             elif op in (0xd8, 0xda, 0xde, 0xe0, 0xe2):
                 a, n = r[o[1]], o[2]
                 r[o[0]] = i32({0xd8: a + n, 0xda: a * n, 0xde: a | n, 0xe0: a << (n & 31),

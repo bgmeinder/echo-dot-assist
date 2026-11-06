@@ -22,6 +22,7 @@ int core_dnd(int set) { (void)set; return dnd_on; }
 static int brightness = 100;
 int core_led_brightness(int set) { (void)set; return brightness; }
 int https_open(const char *url) { (void)url; return -1; }   /* ring_band.c's artwork fetch: none here */
+float core_lux(void) { return -1; }                        /* no light sensor: the clock faces' night by the hour */
 void core_spawn(char *const argv[])
 {
     if (!strcmp(argv[0], "/system/bin/service") && !strcmp(argv[3], "9")) spawns_wake++;

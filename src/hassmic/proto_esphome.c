@@ -77,6 +77,7 @@
 #include "ring.h"
 #include "screen.h"
 #include "board.h"
+#include "clockface.h"
 #include "core.h"
 #include "micgain.h"
 #include "hash.h"
@@ -129,7 +130,7 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_UPDATE_CHANNEL, KEY_UPDATE, KEY_WHISPERED, KEY_ARB_HANDOFF, KEY_WEB_URL, KEY_IDENTIFY, KEY_RESET,
        KEY_TIMER_RINGING, KEY_TIMER_NAMES, KEY_DROPIN_SERVICE, KEY_DROPIN_STATE, KEY_DROPIN_PEER, KEY_DROPIN_END, KEY_RESTART,
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
-       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_LAST_HEARD, KEY_LAST_REPLY };
+       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_LAST_HEARD, KEY_LAST_REPLY, KEY_CLOCK_FACE };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -357,6 +358,16 @@ static void state_text(char *out, size_t cap, const char *s)
 static char last_heard[STATE_CHARS * 4 + 4], last_reply[STATE_CHARS * 4 + 4];
 
 static int listed(int key);
+/* The clock face's select: the setting's choices (clockface_names: "digital", then template ids) as people read them,
+ * "abstract_shapes" -> "Abstract shapes"; at most cap - 1 characters */
+static void face_label(int i, char *out, size_t cap)
+{
+    int n; const char *const *names = clockface_names(&n);
+    snprintf(out, cap, "%s", i >= 0 && i < n ? names[i] : "");
+    for (char *c = out; *c; c++) if (*c == '_') *c = ' ';
+    out[0] = (char)toupper((unsigned char)out[0]);
+}
+
 static void send_setting(int key)       /* lock held */
 {
     if (!listed(key)) return;
@@ -371,6 +382,7 @@ static void send_setting(int key)       /* lock held */
     case KEY_DND:   pb_uint(&b, 2, core_dnd(-1)); send_state(SWITCH_STATE, &b); break;
     case KEY_DENOISE: pb_str(&b, 2, denoise_names[core_mic_denoise(-1)]); send_state(SELECT_STATE, &b); break;
     case KEY_BT_LANG: if (ble_present()) { pb_str(&b, 2, settings_bt_lang()->name); send_state(SELECT_STATE, &b); } break;
+    case KEY_CLOCK_FACE: { char l[40]; face_label(ring_band_face(-1), l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); break; }
     case KEY_EQ_BASS: case KEY_EQ_MID: case KEY_EQ_TREBLE: pb_float(&b, 2, core_eq(key - KEY_EQ_BASS)); send_state(NUMBER_STATE, &b); break;
     case KEY_ARB_JOIN: if (arb_running()) { pb_uint(&b, 2, arb_arbitrate(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_ARB_PEERS: if (arb_running()) { pb_float(&b, 2, arb_peers()); send_state(SENSOR_STATE, &b); } break;
@@ -495,7 +507,7 @@ static void send_light_states(void)     /* lock held */
     if (listed(KEY_LUX)) { sent_lux = core_lux(); sent_at = time(NULL); send_sensor(KEY_LUX, sent_lux); }
     sent_level = core_led_brightness(-1); level_at = time(NULL);
     send_setting(KEY_LED_AUTO); send_setting(KEY_LED_BRIGHTNESS); send_setting(KEY_LIGHT);
-    send_setting(KEY_RING_FILL); send_setting(KEY_RING_ROTATION);
+    send_setting(KEY_RING_FILL); send_setting(KEY_RING_ROTATION); send_setting(KEY_CLOCK_FACE);
 }
 
 static void send_light_entities(void)
@@ -519,6 +531,11 @@ static void send_light_entities(void)
     if (listed(KEY_RING_LEDS)) { PB(b, 256); PB(a, 48); pb_str(&b, 1, "light_ring_leds"); pb_fixed32(&b, 2, KEY_RING_LEDS);
       pb_str(&a, 1, "colors"); pb_uint(&a, 2, 7); pb_bytes(&b, 3, a.p, a.n);
       pb_str(&b, 5, "The light ring LED by LED: \"#rrggbb\" each, \"\" for dark, from where its fill starts"); send_msg(LIST_SERVICE, &b); }
+    /* the round screen's clock: hassmic's digital one or one of the firmware's analog faces (ring_band.c) */
+    if (listed(KEY_CLOCK_FACE)) { PB(b, 1536); char l[40]; int n; clockface_names(&n);
+      pb_str(&b, 1, "clock_face"); pb_fixed32(&b, 2, KEY_CLOCK_FACE); pb_str(&b, 3, "Clock face"); pb_str(&b, 5, "mdi:clock-outline");
+      for (int i = 0; i < n && b.n < 1536 - 48; i++) { face_label(i, l, sizeof l); pb_str(&b, 6, l); }
+      pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
     if (listed(KEY_LUX)) { PB(b, 192); pb_str(&b, 1, "illuminance"); pb_fixed32(&b, 2, KEY_LUX); pb_str(&b, 3, "Illuminance"); pb_str(&b, 6, "lx");
           pb_uint(&b, 7, 0); pb_str(&b, 9, "illuminance"); pb_uint(&b, 10, 1); send_msg(LIST_SENSOR, &b); }
     if (have_auto) {
@@ -563,6 +580,7 @@ static int listed(int key)
     case KEY_LUX: return have_light && settings_on("light_sensor");
     case KEY_LIGHT: return ring_custom();
     case KEY_RING_FILL: case KEY_RING_ROTATION: case KEY_RING_LEDS: return ring_per_led();
+    case KEY_CLOCK_FACE: return settings_find("clock_face") != NULL;
     case KEY_CALL_VOLUME: if (!(dropin_running() && settings_on("drop_in"))) return 0;    /* calls only with Drop In */
         /* fall through */
     case KEY_ASSIST_VOLUME: case KEY_SOUNDS_VOLUME: case KEY_TIMER_VOLUME:       /* one that follows the music has none */
@@ -700,7 +718,7 @@ static void send_setting_entities(void)
 
 static void on_setting(unsigned type, const unsigned char *p, const unsigned char *end)
 {
-    struct pbf f; unsigned key = 0; float num = 0; int on = 0; char opt[32] = "";
+    struct pbf f; unsigned key = 0; float num = 0; int on = 0; char opt[64] = "";
     while (pb_next(&p, end, &f)) {
         if (f.field == 1) key = f.v;
         else if (f.field == 2 && f.wire == 5) { uint32_t u = f.v; memcpy(&num, &u, 4); }
@@ -708,6 +726,11 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
         else if (f.field == 2 && f.data) pbf_str(&f, opt, sizeof opt);
     }
     if (type == SELECT_COMMAND && key == KEY_DENOISE) { for (int i = 0; i < 4; i++) if (!strcmp(opt, denoise_names[i])) core_mic_denoise(i); }
+    else if (type == SELECT_COMMAND && key == KEY_CLOCK_FACE) {
+        int n; const char *const *names = clockface_names(&n); char l[40], e[80];
+        for (int i = 0; i < n; i++) { face_label(i, l, sizeof l); if (!strcmp(opt, l)) { settings_set("clock_face", names[i], e, sizeof e); return; } }
+        return;
+    }
     else if (type == SELECT_COMMAND && key == KEY_BT_LANG) { for (int i = 0; i < bt_lang_count; i++) if (!strcmp(opt, bt_langs[i].name)) settings_bt_lang_index(i); }
     else if (type == NUMBER_COMMAND && key == KEY_MIC_LEVEL) {
         char v[16], e[80]; int l = num < MICGAIN_LEVEL_MIN ? MICGAIN_LEVEL_MIN : num > MICGAIN_LEVEL_MAX ? MICGAIN_LEVEL_MAX : (int)lroundf(num);

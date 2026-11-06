@@ -292,6 +292,17 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 
 .mode .radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--line-2); background: var(--surface); margin-top: 2px; }
 .mode.on .radio { border: 5px solid var(--accent); }
 .mode-sub { color: var(--muted); font-size: 12.5px; line-height: 1.45; margin: 4px 0 0; }
+/* the clock faces (clock_face): a thumbnail each, round as the Spot's screen */
+.faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px; margin-top: 6px; flex: 1; min-width: 0; }
+.face { display: grid; justify-items: center; gap: 4px; padding: 6px 4px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface);
+  color: inherit; font: inherit; font-size: 12px; cursor: pointer; min-width: 0; }
+.face:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line-2)); }
+.face.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); box-shadow: inset 0 0 0 1px var(--accent); }
+/* Amazon's thumbnails: the round face on a white square, 3/4 of its width: cut to the face */
+.face .thumb, .face .digital { width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: #000; }
+.face .thumb img { display: block; width: 84px; height: 84px; margin: -10px; }
+.face .digital { display: grid; place-items: center; color: #f2f2f2; font-size: 16px; font-weight: 600; }
+.face span { overflow-wrap: anywhere; text-align: center; line-height: 1.25; }
 .compare summary { font-size: 13px; }
 /* the comparison: questions down the side, one column per choice, the chosen one tinted */
 .cmp-wrap { margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }

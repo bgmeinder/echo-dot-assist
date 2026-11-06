@@ -424,7 +424,13 @@ Beyond the README's two figures:
   the light "Light ring" show on it as on a Dot's ring. While Music Assistant plays on the Spot, the screen shows the
   cover, large, with the title and the artist under it, in place of the clock. "Clock on the screen" (off, 24h, 12h) puts the time, large,
   and the date on the screen inside the ring, white on black, and keeps the screen on; the time and its zone are
-  Home Assistant's.
+  Home Assistant's. "Clock face" (Lights, a picture of each; also a select in Home Assistant) swaps that digital clock
+  for one of the Spot's own analog faces, the ones Alexa's clock offered (Abstract shapes, Beach, Zen and the rest):
+  each design's default face on its default background, with a ticking second hand, and its night version (dimmed
+  colours, the background dark) from 21:00 to 07:00, as the Spot has no light sensor. hassmic draws them from the
+  firmware's own clock-face package where it lies: nothing is downloaded or copied, and Alexa's clock app stays off.
+  Notifications, the date window and Alexa's alerts on the faces are left out, and so are Photos and the four
+  Wallpaper designs: their pictures came from Amazon's online services.
   The volume of voice replies shows in cyan, as on the Dots. The screen wakes for the band and sleeps 5 minutes after the last light (1 minute with
   the microphones off or in Do not disturb).
 - **Microphone off** plays Alexa's own sounds. A switch that is already off when hassmic starts is shown, not announced.

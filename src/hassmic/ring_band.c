@@ -33,6 +33,7 @@
 #endif
 #include "ring.h"
 #include "board.h"
+#include "clockface.h"
 #include "core.h"
 #include "ringdesign.h"
 #include "screen.h"
@@ -664,11 +665,64 @@ int ring_band_clock(int set)
     return r;
 }
 
+/* An analog face in place of the digital clock (setting clock_face, ring_band_face: an index of clockface_names, 0
+ * "digital"): the firmware's own art (clockface.c), drawn by the renderer from the package where it lies (kinds 7 and
+ * 8 once per renderer, faces_told), every second for the second hand: cleared (6), each part (4: background, dial,
+ * hands), shown (5).  Night (the night images and tints, as stock's dimmed face): the room dark by the light sensor
+ * (under 3 lux, back over 10), or 21:00-07:00 where there is none.  clock_shown is then 100 + the face */
+static int clock_face, faces_told, face_night;
+
+int ring_band_face(int set)
+{
+    int n; clockface_names(&n);
+    pthread_mutex_lock(&lock);
+    if (set >= 0 && set < n && set != clock_face) { clock_face = set; pthread_cond_signal(&cv); }
+    int r = clock_face;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
+static int face_draw(int fd, int tmpl, const struct tm *tm, int new_minute)
+{
+    if (!faces_told) {
+        const char *apk = clockface_apk(), *pkg = clockface_package();
+        if (send_msg(fd, 7, 0, 0, 0, apk, strlen(apk)) || send_msg(fd, 8, 0, 0, 0, pkg, strlen(pkg))) return -1;
+        faces_told = 1;
+    }
+    if (new_minute) {
+        float lux = core_lux();
+        if (lux == lux) face_night = face_night ? lux < 10 : lux < 3;
+        else face_night = tm->tm_hour >= 21 || tm->tm_hour < 7;
+    }
+    struct cf_op ops[48];
+    int n = clockface_ops(tmpl, -1, -1, tm, face_night, ops, 48);
+    if (n < 0) return 1;                            /* no such face: the digital clock */
+    if (send_msg(fd, 6, 0, 0, 0, NULL, 0)) return -1;
+    for (int i = 0; i < n; i++) {
+        int c = ops[i].cx < 0 ? -1 : (ops[i].cx & 0xffff) << 16 | (ops[i].cy & 0xffff);
+        if (send_msg(fd, 4, ops[i].rot, (int)ops[i].tint, c, ops[i].name, strlen(ops[i].name))) return -1;
+    }
+    return send_msg(fd, 5, 0, 0, 0, NULL, 0) ? -1 : 0;
+}
+
 static int clock_tick(int fd)                   /* -1: the renderer is gone */
 {
-    pthread_mutex_lock(&lock); int mode = clock_mode; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); int mode = clock_mode, face = clock_face; pthread_mutex_unlock(&lock);
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
     int minute = tm.tm_hour * 60 + tm.tm_min;
+    if (mode && face > 0 && face <= clockface_count()) {
+        int second = minute * 60 + tm.tm_sec;
+        if (clock_shown == 100 + face && second == clock_minute) return 0;
+        int fresh = clock_shown != 100 + face, r = face_draw(fd, face - 1, &tm, fresh || tm.tm_sec == 0);
+        if (r < 0) return -1;
+        if (!r) {
+            if (fresh) fprintf(stderr, "band: the clock face %s on the screen\n", clockface_names(&(int){0})[face]);
+            if (fresh || tm.tm_sec == 0) screen_wake();   /* as below: the screen kept on, once a minute */
+            clock_shown = 100 + face; clock_minute = second;
+            return 0;
+        }
+        face = 0;                                   /* the package lacks it now: the digital clock */
+    }
     if (mode == clock_shown && (!mode || minute == clock_minute)) return 0;
     if (!mode) {
         if (clock_shown > 0 && send_msg(fd, 1, 0, 0, 0, NULL, 0)) return -1;
@@ -820,7 +874,7 @@ static void *band_thread(void *arg)
                 pthread_mutex_unlock(&lock);
                 continue;
             }
-            fails = 0; have_rows = want; clock_shown = -1; clock_minute = -1; np_on = 0; np_shown = 0;   /* a fresh renderer: all again */
+            fails = 0; have_rows = want; clock_shown = -1; clock_minute = -1; np_on = 0; np_shown = 0; faces_told = 0;   /* a fresh renderer: all again */
             if (!want) fprintf(stderr, "band: off, the whole screen is the apps'\n");
         }
         struct rgb led[LEDS];
@@ -885,6 +939,7 @@ static void *band_thread(void *arg)
             pthread_cond_timedwait(&cv, &lock, &ts);
         } else {                                    /* dark: until something changes, or the timeout check is due */
             struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); ts.tv_sec += 1;
+            if (clock_shown > 100) ts.tv_nsec = 20000000L;  /* an analog face: just past the next second, its hand on time */
             if (!wake_req) pthread_cond_timedwait(&cv, &lock, &ts);
         }
         pthread_mutex_unlock(&lock);

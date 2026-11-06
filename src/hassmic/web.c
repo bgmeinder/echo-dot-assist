@@ -32,6 +32,8 @@
  *   it goes on to root.
  *   The timer's own sound (sounds.c): POST /api/timer-sound, a WAV the page made of the file picked, signed; the
  *   Echo checks the format only, it decodes nothing else.
+ *   The clock faces' thumbnails (clockface.c): GET /api/clockface/<n>, unsigned (an <img> cannot sign; the firmware's
+ *   own pictures, nothing of the Echo's or its owner's), the PNG Amazon's picker showed for choice n of clock_face.
  *   The log: GET /api/log/0 (boot.log) and /1 (its rotated part), signed, for the page's viewer.  What it says is
  *   plain on the network then, like the rest of the page: names, addresses, when the Echo was spoken to.  Secrets do
  *   not go out: the one hassmic logs, the Sendspin pairing token (scripts/lib/setup.sh reads it there over adb), is
@@ -44,6 +46,7 @@
 #include "web.h"
 #include "core.h"
 #include "adbwifi.h"
+#include "clockface.h"
 #include "arb.h"
 #include "dropin.h"
 #include "artifacts.h"
@@ -1019,6 +1022,16 @@ static void log_redact(char *t, size_t n)
     }
 }
 
+static void clockface_api(int fd, struct req *r)
+{
+    int i; size_t n = 0; unsigned char *png;
+    if (sscanf(r->path, "/api/clockface/%d", &i) != 1 || i < 1 || !(png = clockface_thumb(i - 1, &n))) {
+        respond_json(fd, 404, "{\"error\":\"not found\"}"); return;
+    }
+    respond(fd, 200, "image/png", NULL, png, n);
+    free(png);
+}
+
 static void log_api(int fd, struct req *r)
 {
     char path[300]; int part; FILE *f; long size, from; char *t; size_t n;
@@ -1163,6 +1176,7 @@ static void handle(int fd)
     else if (!strncmp(r.path, "/api/sound/", 11)) sound_api(fd, &r);
     else if (!strncmp(r.path, "/api/sound-pack", 15)) sound_pack_api(fd, &r);
     else if (!strcmp(r.method, "GET") && !strncmp(r.path, "/api/log/", 9)) log_api(fd, &r);
+    else if (!strcmp(r.method, "GET") && !strncmp(r.path, "/api/clockface/", 15)) clockface_api(fd, &r);
     else respond_json(fd, 404, "{\"error\":\"not found\"}");
     free(r.body);
 }

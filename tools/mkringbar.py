@@ -134,7 +134,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dexasm import (Code, Program, AGET_OBJ, APUT_OBJ, VIRT, DIRECT, STATIC, STATIC_RANGE,  # noqa: E402
-                    ADD8, MUL8, USHR8, SUB, MUL, ADD, IFNE, IFGE, IFLT, IFEQZ, IFNEZ, IFLTZ,
+                    ADD8, MUL8, USHR8, SUB, MUL, DIV, AND, ADD, IFNE, IFGE, IFLT, IFEQZ, IFNEZ, IFLTZ,
                     SB, STR, CLS, OBJ, MTH, CTOR, INTG, ISTRM, CLSARR, STRARR, OBJARR, BYTES, INTS)
 import dexasm                                                  # noqa: E402
 
@@ -165,6 +165,7 @@ SELF = [
     ("wipe",  (OBJARR, OBJ), "V"),
     ("payload", (OBJARR, ISTRM, INTS, "I"), "Z"),
     ("imagem", (OBJARR, BYTES, INTS, "I"), "V"),
+    ("facem", (OBJARR, BYTES, INTS, "I"), "V"),
     ("full",  (ISTRM, BYTES), "Z"),
     ("meth",  (STR, STR, STRARR), MTH),
     ("cls",   (STR,), CLS),
@@ -505,6 +506,18 @@ def emit():
         c.invoke(STATIC, "clear", [6])                        # kind 1
         c.goto_("redo")
         c.label("t2")
+        c.const_4(15, 5); c.if2(IFNE, 14, 15, "t6")
+        c.goto_("redo")                                       # kind 5: what was drawn shown
+        c.label("t6")
+        c.const_4(15, 6); c.if2(IFNE, 14, 15, "t3")
+        c.invoke(STATIC, "clear", [6])                        # kind 6: cleared, nothing shown yet
+        c.goto_("msg")
+        c.label("t3")
+        c.const_4(15, 4); c.if2(IFLT, 14, 15, "t23")
+        c.invoke(STATIC, "payload", [6, 7, 13, 1]); c.move_result(14)             # kinds 4, 7, 8: drawn or kept, not shown
+        c.ifz(IFEQZ, 14, "end")
+        c.goto_("msg")
+        c.label("t23")
         c.invoke(STATIC, "payload", [6, 7, 13, 1]); c.move_result(14)             # kind 2 (text) or 3 (an image)
         c.ifz(IFEQZ, 14, "end")
         c.label("redo")
@@ -531,6 +544,10 @@ def emit():
         c.ret(6, False)                                       # stdin ended inside it
         c.label("got")
         c.const_4(6, 0); c.aget(7, 2, 6, AGET)
+        c.const_4(6, 4); c.if2(IFLT, 7, 6, "img")
+        c.invoke(STATIC, "facem", [0, 5, 2, 3])               # a clock face's part, or what it is drawn from
+        c.const_4(6, 1); c.ret(6, False)
+        c.label("img")
         c.const_4(6, 3); c.if2(IFNE, 7, 6, "text")
         c.invoke(STATIC, "imagem", [0, 5, 2, 3])
         c.const_4(6, 1); c.ret(6, False)
@@ -571,6 +588,108 @@ def emit():
         c.ret_void()
         m.append(("imagem", c))
 
+    def facem():
+        # The analog clock faces (hassmic's clockface.c): drawables of the firmware's clock-face package, drawn by the
+        # framework from the package itself (layer-lists and all), into the text bitmap under the ring.
+        # kind 7, payload the package's path: Resources over it, with the screen's own metrics, so the art comes out at
+        # the size stock drew it (ms[21]); kind 8, payload its package name, which getIdentifier wants (ms[22]);
+        # kind 4, payload a drawable's name: drawn rotated by a / 100 degrees about the centre, tinted b (ARGB,
+        # PorterDuff SRC_IN; 0 none), centred on c = x << 16 | y of a 480 x 480 face at its own size or, c = -1,
+        # filling the face.  The screen is square (the Spot's 480 x 480): w is both sides.  A name the package does not
+        # have is left out.
+        # ms=0 bytes=1 hdr=2 w=3 res=4 s=5 t=6 k=7 d=8 ps=9 as=10 v=11 x=12 y=13 iw=14 ih=15
+        c = Code(16, 4)
+        c.new_instance(5, STR); c.invoke(DIRECT, "str.new_b", [5, 1])
+        c.const_4(7, 0); c.aget(6, 2, 7, AGET)
+        c.lit(7, 8); c.if2(IFNE, 6, 7, "not8")
+        c.lit(7, 22); c.aput(5, 0, 7, APUT_OBJ)
+        c.ret_void()
+        c.label("not8")
+        c.lit(7, 7); c.if2(IFNE, 6, 7, "draw")
+        c.const_string(4, "android.content.res.AssetManager"); c.invoke(STATIC, "cls.forName", [4]); c.move_result(4, True)
+        c.invoke(VIRT, "cls.newi", [4]); c.move_result(4, True)
+        c.const_string(6, "addAssetPath"); c.const_string(7, "java.lang.String"); c.invoke(STATIC, "w1", [4, 6, 7, 5])
+        c.const_string(6, "android.content.res.Resources"); c.const_string(7, "getSystem")
+        c.invoke(STATIC, "sinv0", [6, 7]); c.move_result(8, True)
+        c.const_string(7, "getDisplayMetrics"); c.invoke(STATIC, "os", [8, 7]); c.move_result(11, True)
+        c.const_string(7, "getConfiguration"); c.invoke(STATIC, "os", [8, 7]); c.move_result(12, True)
+        c.invoke(STATIC, "cls.forName", [6]); c.move_result(6, True)
+        c.const_4(7, 3); c.new_array(9, 7, CLSARR); c.new_array(10, 7, OBJARR)
+        for i, (reg, cn) in enumerate(((4, "android.content.res.AssetManager"), (11, "android.util.DisplayMetrics"),
+                                       (12, "android.content.res.Configuration"))):
+            c.const_string(13, cn); c.invoke(STATIC, "cls.forName", [13]); c.move_result(13, True)
+            c.const_4(7, i); c.aput(13, 9, 7, APUT_OBJ); c.aput(reg, 10, 7, APUT_OBJ)
+        c.invoke(VIRT, "cls.getc", [6, 9]); c.move_result(6, True)
+        c.invoke(VIRT, "ctor.newi", [6, 10]); c.move_result(6, True)    # new Resources(assets, metrics, configuration)
+        c.lit(7, 21); c.aput(6, 0, 7, APUT_OBJ)
+        c.ret_void()
+        c.label("draw")
+        c.lit(7, 21); c.aget(4, 0, 7, AGET_OBJ)
+        c.ifz(IFNEZ, 4, "res")
+        c.ret_void()                                          # no package told yet
+        c.label("res")
+        c.const_4(7, 3); c.new_array(9, 7, STRARR); c.new_array(10, 7, OBJARR)
+        c.const_string(6, "java.lang.String")
+        for i in range(3):
+            c.const_4(7, i); c.aput(6, 9, 7, APUT_OBJ)
+        c.const_4(7, 0); c.aput(5, 10, 7, APUT_OBJ)
+        c.const_string(6, "drawable"); c.const_4(7, 1); c.aput(6, 10, 7, APUT_OBJ)
+        c.lit(7, 22); c.aget(6, 0, 7, AGET_OBJ); c.const_4(7, 2); c.aput(6, 10, 7, APUT_OBJ)
+        c.const_string(6, "getIdentifier"); c.invoke(STATIC, "inv", [4, 6, 9, 10]); c.move_result(11, True)
+        c.check_cast(11, INTG); c.invoke(VIRT, "int.intval", [11]); c.move_result(6)
+        c.ifz(IFNEZ, 6, "found")
+        c.ret_void()
+        c.label("found")
+        c.const_string(6, "getDrawable"); c.const_string(7, "int"); c.invoke(STATIC, "w1", [4, 6, 7, 11]); c.move_result(8, True)
+        c.const_string(6, "mutate"); c.invoke(STATIC, "os", [8, 6]); c.move_result(8, True)   # its own state: the tint stays on it
+        c.const_4(7, 2); c.aget(6, 2, 7, AGET)
+        c.ifz(IFEQZ, 6, "bounds")
+        c.invoke(STATIC, "int.value", [6]); c.move_result(12, True)
+        c.lit(7, 23); c.aget(13, 0, 7, AGET_OBJ)
+        c.const_string(9, "setColorFilter"); c.const_string(10, "int"); c.const_string(11, "android.graphics.PorterDuff$Mode")
+        c.invoke_range(STATIC_RANGE, "w2", 8, 6)
+        c.label("bounds")
+        c.const_4(7, 3); c.aget(6, 2, 7, AGET)
+        c.ifz(IFLTZ, 6, "fill")
+        c.binop_lit8(USHR8, 12, 6, 16)
+        c.lit(7, 0xffff); c.binop(AND, 13, 6, 7)
+        c.binop(MUL, 12, 12, 3); c.binop(MUL, 13, 13, 3)
+        c.lit(7, 480); c.binop(DIV, 12, 12, 7); c.binop(DIV, 13, 13, 7)            # the face's 480 to the screen's w
+        c.const_string(6, "getIntrinsicWidth"); c.invoke(STATIC, "os", [8, 6]); c.move_result(14, True)
+        c.check_cast(14, INTG); c.invoke(VIRT, "int.intval", [14]); c.move_result(14)
+        c.const_string(6, "getIntrinsicHeight"); c.invoke(STATIC, "os", [8, 6]); c.move_result(15, True)
+        c.check_cast(15, INTG); c.invoke(VIRT, "int.intval", [15]); c.move_result(15)
+        c.ifz(IFLTZ, 14, "fill")                              # no size of its own (a colour): the face
+        c.ifz(IFLTZ, 15, "fill")
+        c.binop_lit8(USHR8, 6, 14, 1); c.binop(SUB, 12, 12, 6)
+        c.binop_lit8(USHR8, 6, 15, 1); c.binop(SUB, 13, 13, 6)
+        c.binop(ADD, 14, 12, 14); c.binop(ADD, 15, 13, 15)
+        c.goto_("set")
+        c.label("fill")
+        c.const_4(12, 0); c.const_4(13, 0); c.move(14, 3); c.move(15, 3)
+        c.label("set")
+        c.const_4(7, 4); c.new_array(9, 7, STRARR); c.new_array(10, 7, OBJARR)
+        c.const_string(6, "int")
+        for i, reg in enumerate((12, 13, 14, 15)):
+            c.invoke(STATIC, "int.value", [reg]); c.move_result(11, True)
+            c.const_4(7, i); c.aput(6, 9, 7, APUT_OBJ); c.aput(11, 10, 7, APUT_OBJ)
+        c.const_string(6, "setBounds"); c.invoke(STATIC, "inv", [8, 6, 9, 10])
+        c.const_4(7, 4); c.aget(4, 0, 7, AGET_OBJ)            # the text bitmap's Canvas
+        c.const_string(6, "save"); c.invoke(STATIC, "os", [4, 6])
+        c.const_4(7, 3); c.new_array(9, 7, STRARR); c.new_array(10, 7, OBJARR)
+        c.const_string(6, "float")
+        for i in range(3):
+            c.const_4(7, i); c.aput(6, 9, 7, APUT_OBJ)
+        c.const_4(7, 1); c.aget(6, 2, 7, AGET); c.lit(7, 100); c.binop(DIV, 6, 6, 7)   # whole degrees: fbox takes ints
+        c.invoke(STATIC, "fbox", [6]); c.move_result(11, True); c.const_4(7, 0); c.aput(11, 10, 7, APUT_OBJ)
+        c.binop_lit8(USHR8, 6, 3, 1); c.invoke(STATIC, "fbox", [6]); c.move_result(11, True)
+        c.const_4(7, 1); c.aput(11, 10, 7, APUT_OBJ); c.const_4(7, 2); c.aput(11, 10, 7, APUT_OBJ)
+        c.const_string(6, "rotate"); c.invoke(STATIC, "inv", [4, 6, 9, 10])        # about the centre
+        c.const_string(6, "draw"); c.const_string(7, "android.graphics.Canvas"); c.invoke(STATIC, "w1", [8, 6, 7, 4])
+        c.const_string(6, "restore"); c.invoke(STATIC, "os", [4, 6])
+        c.ret_void()
+        m.append(("facem", c))
+
     def wipe():                                               # canvas.drawColor(0, PorterDuff.Mode.CLEAR): the buffer cleared before the draw.  A
         # layer with alpha is blended over what the buffer holds, and SurfaceFlinger hands the buffers round: the frame
         # of two or three draws ago is in it (the Spot showed two minute digits at once, 2026-11-05)
@@ -588,10 +707,11 @@ def emit():
         # 2 drawBitmap, 3 the text Bitmap, 4 its Canvas, 5 the Paint, 6 base (the bitmap's pixels), 7 System.arraycopy,
         # 8 the header's bytes, 9 its ints, 10 getPixels, 11 drawText, 12 eraseColor, 13 setTextSize, 14 setColor,
         # 15 createBitmap, 16 Canvas.drawColor, 17 PorterDuff.Mode.CLEAR, 18 BitmapFactory.decodeByteArray, 19 the Rect
-        # constructor, 20 Canvas.drawBitmap(Bitmap, Rect, Rect, Paint)
+        # constructor, 20 Canvas.drawBitmap(Bitmap, Rect, Rect, Paint), 21 the clock faces' Resources (facem), 22 their
+        # package's name, 23 PorterDuff.Mode.SRC_IN (their tints)
         # w=0 h=1 ms=2 t=3 k=4 x=5 y=6 z=7
         c = Code(8, 2)
-        c.lit(4, 21); c.new_array(2, 4, OBJARR)
+        c.lit(4, 24); c.new_array(2, 4, OBJARR)
 
         def meth(at, cls, name, ps):
             c.lit(4, len(ps)); c.new_array(3, 4, STRARR)
@@ -624,6 +744,10 @@ def emit():
         c.const_string(4, "CLEAR"); c.invoke(VIRT, "cls.getf", [3, 4]); c.move_result(3, True)
         c.const_4(4, 0); c.invoke(VIRT, "f.get", [3, 4]); c.move_result(3, True)
         c.lit(4, 17); c.aput(3, 2, 4, APUT_OBJ)
+        c.const_string(3, "android.graphics.PorterDuff$Mode"); c.invoke(STATIC, "cls.forName", [3]); c.move_result(3, True)
+        c.const_string(4, "SRC_IN"); c.invoke(VIRT, "cls.getf", [3, 4]); c.move_result(3, True)
+        c.const_4(4, 0); c.invoke(VIRT, "f.get", [3, 4]); c.move_result(3, True)
+        c.lit(4, 23); c.aput(3, 2, 4, APUT_OBJ)
         c.binop(MUL, 4, 0, 1); c.new_array(3, 4, INTS); c.const_4(4, 6); c.aput(3, 2, 4, APUT_OBJ)    # base
         c.lit(4, 20); c.new_array(3, 4, BYTES); c.lit(4, 8); c.aput(3, 2, 4, APUT_OBJ)                 # the header's bytes
         c.const_4(4, 5); c.new_array(3, 4, INTS); c.lit(4, 9); c.aput(3, 2, 4, APUT_OBJ)                # its ints
@@ -896,7 +1020,7 @@ def emit():
         c.ret_void()
         m.append(("out", c))
 
-    for f in (main, overscan, create, surface, meths, loop, table, ring, setup, callm, fbox, clear, textm, pixels, wipe, payload, imagem, map_,
+    for f in (main, overscan, create, surface, meths, loop, table, ring, setup, callm, fbox, clear, textm, pixels, wipe, payload, imagem, facem, map_,
               full, meth, cls, inv, sinv, sinv0, w1, w2, os_, fint, out):
         f()
     return m
@@ -910,6 +1034,7 @@ SC, SURF, CANVAS = "Landroid/view/SurfaceControl;", "Landroid/view/Surface;", "L
 BITMAP, BCONFIG, PAINT, PALIGN = "Landroid/graphics/Bitmap;", "Landroid/graphics/Bitmap$Config;", "Landroid/graphics/Paint;", "Landroid/graphics/Paint$Align;"
 PDMODE = "Landroid/graphics/PorterDuff$Mode;"
 SCB = "Landroid/view/SurfaceControl$Builder;"
+AMGR, RES, DRAWABLE = "Landroid/content/res/AssetManager;", "Landroid/content/res/Resources;", "Landroid/graphics/drawable/Drawable;"
 DMG, DINFO = "Landroid/hardware/display/DisplayManagerGlobal;", "Landroid/view/DisplayInfo;"
 REFLECTED = [
     ("Landroid/os/ServiceManager;", "getService", [STR], True),
@@ -950,6 +1075,24 @@ REFLECTED = [
     ("Landroid/graphics/BitmapFactory;", "decodeByteArray", ["[B", "I", "I"], True),
     ("Landroid/graphics/Rect;", "<init>", ["I", "I", "I", "I"], False),
     (CANVAS, "drawBitmap", [BITMAP, "Landroid/graphics/Rect;", "Landroid/graphics/Rect;", PAINT], False),
+    # the clock faces: the package's drawables through Resources of their own
+    (AMGR, "<init>", [], False),
+    (AMGR, "addAssetPath", [STR], False),
+    (RES, "getSystem", [], True),
+    (RES, "getDisplayMetrics", [], False),
+    (RES, "getConfiguration", [], False),
+    (RES, "<init>", [AMGR, "Landroid/util/DisplayMetrics;", "Landroid/content/res/Configuration;"], False),
+    (RES, "getIdentifier", [STR, STR, STR], False),
+    (RES, "getDrawable", ["I"], False),
+    (DRAWABLE, "mutate", [], False),
+    (DRAWABLE, "setColorFilter", ["I", PDMODE], False),
+    (DRAWABLE, "getIntrinsicWidth", [], False),
+    (DRAWABLE, "getIntrinsicHeight", [], False),
+    (DRAWABLE, "setBounds", ["I", "I", "I", "I"], False),
+    (DRAWABLE, "draw", [CANVAS], False),
+    (CANVAS, "save", [], False),
+    (CANVAS, "rotate", ["F", "F", "F"], False),
+    (CANVAS, "restore", [], False),
 ]
 REFLECTED_FIELDS = [
     (DINFO, "logicalWidth", "I"),
@@ -958,6 +1101,7 @@ REFLECTED_FIELDS = [
     (BCONFIG, "ARGB_8888", BCONFIG),
     (PALIGN, "CENTER", PALIGN),
     (PDMODE, "CLEAR", PDMODE),
+    (PDMODE, "SRC_IN", PDMODE),
 ]
 CONSTANTS = [
     ("Landroid/graphics/PixelFormat;", "OPAQUE", OPAQUE),

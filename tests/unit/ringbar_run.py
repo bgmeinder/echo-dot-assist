@@ -119,10 +119,74 @@ class BitmapCanvas(Fake):                                      # new Canvas(bitm
         self.bmp.px[t * self.bmp.w + l] = i32(0xff000000 | bm.data[0])
         self.log("image", bytes(bm.data), dst.box, paint.flags)
 
+    rot, saved = None, 0
+
+    def save(self): self.saved += 1; return self.saved
+    def rotate(self, d, px, py): assert self.saved; self.rot = (d, px, py)
+    def restore(self): assert self.saved; self.saved -= 1; self.rot = None
+
     def drawText(self, s, x, y, paint):
         assert isinstance(paint, Paint) and paint.size is not None and paint.color is not None
         self.bmp.px[int(y) * self.bmp.w + int(x)] = paint.color
         self.log("text", s, x, y, paint.size, paint.color, paint.align)
+
+
+class AssetManager(Fake):                                      # the clock faces' package (facem)
+    JAVA = "android.content.res.AssetManager"
+
+    def __init__(self):
+        self.paths = []
+
+    def addAssetPath(self, p):
+        self.paths.append(p); self.log("asset", p); return 1
+
+
+class Metrics(Fake):
+    JAVA = "android.util.DisplayMetrics"
+
+
+class Config(Fake):
+    JAVA = "android.content.res.Configuration"
+
+
+class Resources(Fake):
+    JAVA = "android.content.res.Resources"
+    SYSTEM = None
+    NAMES = {"hand": 0x7f020001, "dial": 0x7f020002, "dot": 0x7f020003}
+
+    def __init__(self, am=None, dm=None, cf=None):
+        self.am, self.dm, self.cf = am, dm, cf
+
+    def getDisplayMetrics(self): return Metrics()
+    def getConfiguration(self): return Config()
+
+    def getIdentifier(self, name, kind, pkg):
+        assert kind == "drawable" and pkg == "com.example.faces" and isinstance(self.am, AssetManager)
+        assert isinstance(self.dm, Metrics) and isinstance(self.cf, Config)
+        return self.NAMES.get(name, 0)
+
+    def getDrawable(self, i):
+        return Drawable({v: k for k, v in self.NAMES.items()}[i])
+
+
+class Drawable(Fake):                                          # "dot" has a size of its own (40 x 20), the rest fill
+    JAVA = "android.graphics.drawable.BitmapDrawable"
+    AS = ("Landroid/graphics/drawable/Drawable;",)
+
+    def __init__(self, name):
+        self.name, self.tint, self.box, self.mutated = name, None, None, False
+
+    def mutate(self): self.mutated = True; return self
+    def setColorFilter(self, c, mode): self.tint = (c, mode)
+    def getIntrinsicWidth(self): return 40 if self.name == "dot" else -1
+    def getIntrinsicHeight(self): return 20 if self.name == "dot" else -1
+    def setBounds(self, l, t, r, b): self.box = (l, t, r, b)
+
+    def draw(self, canvas):
+        assert isinstance(canvas, BitmapCanvas) and self.mutated
+        l, t, r, b = self.box
+        canvas.bmp.px[t * canvas.bmp.w + l] = i32(0xff000000 | len(self.name))
+        self.log("drawable", self.name, self.box, self.tint, canvas.rot)
 
 
 class Rect(Fake):
@@ -190,7 +254,7 @@ class Surface(Fake):
 
 class JavaEnv(dexrun.JavaEnv):
     CLASSES = (WindowManager, DisplayInfo, DisplayManagerGlobal, SurfaceSession, SurfaceControl, SurfaceControlBuilder,
-               Surface, Canvas, Bitmap, BitmapCanvas, Paint, Rect)
+               Surface, Canvas, Bitmap, BitmapCanvas, Paint, Rect, AssetManager, Resources, Drawable, Metrics, Config)
     NAMES = ("android.os.ServiceManager", "android.view.IWindowManager$Stub", "android.os.IBinder",
              "android.graphics.Rect", "android.graphics.Paint", "[I", "android.graphics.Bitmap$Config",
              "android.graphics.Paint$Align", "java.lang.System", "java.lang.Object", "android.graphics.PorterDuff$Mode",
@@ -198,7 +262,7 @@ class JavaEnv(dexrun.JavaEnv):
 
     def static_field(self, cls, name):
         assert (cls, name) in (("android.graphics.Bitmap$Config", "ARGB_8888"), ("android.graphics.Paint$Align", "CENTER"),
-                               ("android.graphics.PorterDuff$Mode", "CLEAR")), (cls, name)
+                               ("android.graphics.PorterDuff$Mode", "CLEAR"), ("android.graphics.PorterDuff$Mode", "SRC_IN")), (cls, name)
         return name
 
     def __init__(self, display, stdin=(), api9=False):
@@ -219,6 +283,8 @@ class JavaEnv(dexrun.JavaEnv):
             assert self.tx == (name == "closeTransaction"), f"{name} twice"
             self.tx = name == "openTransaction"
             self.log.append((name,)); return None
+        if (cls, name) == ("android.content.res.Resources", "getSystem"):
+            return Resources()
         if (cls, name) == ("android.graphics.Bitmap", "createBitmap"):
             assert args[2] == "ARGB_8888", args
             return Bitmap(args[0], args[1])
@@ -334,6 +400,22 @@ def main():
     want[60 * 480 + 135] = i32(0xff00002a)
     for a, b in pairs: want[a] = sp1[b]
     check(len(draws) == 3 and draws[-1] == shape(want), "the image under the ring; one that does not decode: nothing drawn, no stop")
+
+    # the clock faces: 7 the package (Resources over it), 8 its name, 6 cleared unshown, 4 a drawable each (rotated a / 100
+    # degrees about the centre, tint b with SRC_IN, centred on c = x << 16 | y of 480 at its own size or filling the face
+    # at -1), 5 shown; a name the package lacks left out, a drawable before any package nothing
+    stream = (table + msg(4, 0, 0, -1, b"dial") + msg(7, payload=b"/system/faces.apk") + msg(8, payload=b"com.example.faces")
+              + msg(6) + msg(4, 0, 0, -1, b"dial") + msg(4, 30425, i32(0xff00fff4), -1, b"hand")
+              + msg(4, 0, 0, (240 << 16) | 330, b"dot") + msg(4, 0, 0, -1, b"nothing") + msg(5))
+    env = run(["10", "ctor", "ring"], (480, 480, 0), [stream])
+    drawn = [e for e in env.log if e[0] == "drawable"]
+    check(("asset", "/system/faces.apk") in env.log, "faces: the package's path added to an AssetManager of their own")
+    check(drawn == [("drawable", "dial", (0, 0, 480, 480), None, (0.0, 240.0, 240.0)),
+                    ("drawable", "hand", (0, 0, 480, 480), (i32(0xff00fff4), "SRC_IN"), (304.0, 240.0, 240.0)),
+                    ("drawable", "dot", (220, 320, 260, 340), None, (0.0, 240.0, 240.0))],
+          f"faces: filling or centred at their own size, rotated in whole degrees about the centre, tinted SRC_IN ({drawn})")
+    seq = [e[0] for e in env.log if e[0] in ("drawable", "post")]
+    check(seq == ["drawable"] * 3 + ["post"], "faces: drawn first, shown once at kind 5; before the package: nothing")
 
     env = run(["10", "ctor", "ring"], (480, 480, 0), [table[:10]])
     check(env.out == ["ready 480 480"] and not [e for e in env.log if e[0] == "draw"],

@@ -59,7 +59,10 @@ struct board {
                                        the volume while headphones are in and puts the speaker's back after; NULL: none */
     int screen_round;               /* 1: a round screen (rook): ring_band.c draws the light ring as a ring at the rim,
                                        light_band = its thickness, instead of a band along the bottom (ringbar's ring mode) */
-    int volume_steps;               /* volume_step-NN animations of ledcontroller */
+    /* the firmware's own clock-face package (clockface.c: Amazon's analog faces, read where it lies) and its package
+     * name (the renderer's Resources look its drawables up by it); NULL: none */
+    const char *clock_faces, *clock_faces_pkg;
+    int volume_steps;              /* volume_step-NN animations of ledcontroller */
     /* LEDs the light really shows, where that is fewer than stock's animations draw (12): 1 = one RGB LED that shows the
      * first of each frame (the Echo Input's LP5562): nothing turned towards the talker, no LED's own layer (ring.c).
      * 0: a ring of them all */

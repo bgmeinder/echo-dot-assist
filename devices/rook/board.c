@@ -87,6 +87,10 @@ const struct board board = {
     .light_sensor = { NULL },
     .jack_state = "/sys/class/switch/h2w/state",                 /* 0 out, 1 headset, 2 headphones (2026-11-05) */
     .screen_round = 1,                                              /* the ring drawn around the rim of the round screen (ring_band.c) */
+    /* the Spot's clock-face package: Amazon's analog faces as data (templates, faces, backgrounds) and their art,
+     * read where it lies (clockface.c); stock's clock app that drew them is Alexa's and stays off */
+    .clock_faces = "/system/priv-app/com.amazon.selector.clock.resources/com.amazon.selector.clock.resources.apk",
+    .clock_faces_pkg = "com.amazon.selector.clock.resources",
     .volume_steps = 100,                                            /* the light band (ring_band.c) shows the level in % */
     /* The Dot 2's codec family: the HAL's speaker path (audio_device.xml, "Right Channel Only" on) sets
      * "HP Driver Gain Volume" 9, the stock Spot reads 9 9 from tinymix (2026-11-04); verify the control is the

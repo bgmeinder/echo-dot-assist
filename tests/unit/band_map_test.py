@@ -22,6 +22,7 @@ int core_dnd(int set) { (void)set; return 0; }
 int core_led_brightness(int set) { (void)set; return 100; }
 void core_spawn(char *const argv[]) { (void)argv; }
 int https_open(const char *url) { (void)url; return -1; }   /* ring_band.c's artwork fetch: none here */
+float core_lux(void) { return -1; }
 int main(void)
 {
     int s = slot_of(P_THINK), c; static struct rgb row[%d]; struct rgb led[LEDS];
@@ -44,6 +45,7 @@ int core_dnd(int set) { (void)set; return 0; }
 int core_led_brightness(int set) { (void)set; return 100; }
 void core_spawn(char *const argv[]) { (void)argv; }
 int https_open(const char *url) { (void)url; return -1; }   /* ring_band.c's artwork fetch: none here */
+float core_lux(void) { return -1; }
 int main(int argc, char **argv)
 {
     int fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -57,13 +59,13 @@ SCREEN, ROWS = 480, 10
 with tempfile.TemporaryDirectory() as tmp:
     src, exe = os.path.join(tmp, "band_map.c"), os.path.join(tmp, "band_map")
     open(src, "w").write(harness)
-    subprocess.run(["cc", "-O2", "-w", f"-I{ROOT}/src/hassmic", src, f"{ROOT}/src/hassmic/ringdesign.c", f"{ROOT}/src/hassmic/statefile.c", f"{ROOT}/src/hassmic/screen_none.c",
-                    "-lm", "-lpthread", "-o", exe], check=True)
+    subprocess.run(["cc", "-O2", "-w", f"-I{ROOT}/src/hassmic", src, f"{ROOT}/src/hassmic/ringdesign.c", f"{ROOT}/src/hassmic/statefile.c", f"{ROOT}/src/hassmic/screen_none.c", f"{ROOT}/src/hassmic/clockface.c", f"{ROOT}/src/hassmic/json.c",
+                    "-lz", "-lm", "-lpthread", "-o", exe], check=True)
     out = subprocess.run([exe], input=" ".join(str(v) for d in designs for c in d for v in c), capture_output=True, text=True, check=True).stdout
     src2, exe2, tab = os.path.join(tmp, "table.c"), os.path.join(tmp, "table"), os.path.join(tmp, "table.bin")
     open(src2, "w").write(table_harness)
-    subprocess.run(["cc", "-O2", "-w", f"-I{ROOT}/src/hassmic", src2, f"{ROOT}/src/hassmic/ringdesign.c", f"{ROOT}/src/hassmic/statefile.c", f"{ROOT}/src/hassmic/screen_none.c",
-                    "-lm", "-lpthread", "-o", exe2], check=True)
+    subprocess.run(["cc", "-O2", "-w", f"-I{ROOT}/src/hassmic", src2, f"{ROOT}/src/hassmic/ringdesign.c", f"{ROOT}/src/hassmic/statefile.c", f"{ROOT}/src/hassmic/screen_none.c", f"{ROOT}/src/hassmic/clockface.c", f"{ROOT}/src/hassmic/json.c",
+                    "-lz", "-lm", "-lpthread", "-o", exe2], check=True)
     subprocess.run([exe2, tab, str(SCREEN), str(SCREEN), str(ROWS)], check=True, stderr=subprocess.DEVNULL)
     raw = open(tab, "rb").read()
     c_W, c_rows_n, c_n = struct.unpack("<3I", raw[:12])
