@@ -252,7 +252,7 @@ static int image_op(struct json *j, int l, int night, struct cf_op *op)
     int cx = json_get(j, l, "center_x"), cy = json_get(j, l, "center_y");
     op->cx = cx >= 0 && cy >= 0 ? (int)json_int(j, cx, -1) : -1;
     op->cy = cx >= 0 && cy >= 0 ? (int)json_int(j, cy, -1) : -1;
-    op->rot = 0; op->text[0] = 0; op->size = 0;
+    op->rot = 0; op->text[0] = 0; op->size = 0; op->mask[0] = 0;
     return 1;
 }
 
@@ -264,9 +264,11 @@ static int date_only(struct json *j, int l)
 }
 
 /* The DateWindowLayer: the day of the month, centred on center_x, its baseline at bottom_y, in day_color/night_color.
- * Its style (TextAppearance.Fluid.Speech.Secondary3) is a theme of Amazon's app, not in the package: 26 px fills the
- * window images (72 x 52, the text's baseline 12 px under their centre) as stock's day number did, by eye */
+ * Its style is a theme of Amazon's app, not in the package: Secondary3 (56 of the 57 faces) at 26 px fills the window
+ * images (72 x 52, the text's baseline 12 px under their centre) as stock's day number did, by eye; Primary2 (stellar,
+ * the date alone at the bottom) larger */
 #define DATE_PX 26
+#define DATE_PX_PRIMARY 34
 static int date_op(struct json *j, int l, int night, int mday, struct cf_op *op)
 {
     char v[96] = "";
@@ -276,7 +278,7 @@ static int date_op(struct json *j, int l, int night, int mday, struct cf_op *op)
     op->cx = (int)json_int(j, cx, 240); op->cy = (int)json_int(j, by, 240);
     op->tint = json_str(j, json_get(j, l, night ? "night_color" : "day_color"), v, sizeof v) ? colour(v) : 0;
     if (!op->tint) op->tint = 0xFFFFFFFFu;
-    op->size = DATE_PX;
+    op->size = json_str(j, json_get(j, l, "style"), v, sizeof v) && strstr(v, ".Primary") ? DATE_PX_PRIMARY : DATE_PX;
     snprintf(op->text, sizeof op->text, "%d", mday);
     return 1;
 }
@@ -312,6 +314,9 @@ int clockface_ops(int ti, int style, int color, int date, const struct tm *tm, i
                    : json_streq(&j, r, "MINUTE") ? m * 6 : json_streq(&j, r, "SECOND") ? s * 6 : -1;
         if (deg < 0) continue;
         ops[n].rot = (int)(deg * 100 + 0.5) % 36000; ops[n].cx = ops[n].cy = -1; ops[n].text[0] = 0;
+        /* MaskedRotatingHandLayer (stellar's sky disc, a full 480 x 480 picture turned once a day): only through its
+         * mask's window; unmasked it covered the background, the date and all */
+        if (json_streq(&j, type, "MaskedRotatingHandLayer")) json_str(&j, json_get(&j, l, "mask"), ops[n].mask, sizeof ops[n].mask);
         n++;
     }
     json_free(&j); free(b);

@@ -603,11 +603,21 @@ def emit():
         # kind 4, payload a drawable's name: drawn rotated by a / 100 degrees about the centre, tinted b (ARGB,
         # PorterDuff SRC_IN; 0 none), centred on c = x << 16 | y of a 480 x 480 face at its own size or, c = -1,
         # filling the face.  The screen is square (the Spot's 480 x 480): w is both sides.  A name the package does not
-        # have is left out.
+        # have is left out.  A masked part (stellar's sky disc, MaskedRotatingHandLayer): kind 11 opens a layer
+        # (saveLayer), kind 4 draws the part into it, kind 12 its mask with DST_IN (the part kept where the mask is
+        # opaque) and merges the layer, whether the mask was found or not.
         # ms=0 bytes=1 hdr=2 w=3 res=4 s=5 t=6 k=7 d=8 ps=9 as=10 v=11 x=12 y=13 iw=14 ih=15
         c = Code(16, 4)
         c.new_instance(5, STR); c.invoke(DIRECT, "str.new_b", [5, 1])
         c.const_4(7, 0); c.aget(6, 2, 7, AGET)
+        c.lit(7, 11); c.if2(IFNE, 6, 7, "not11")
+        c.const_4(7, 4); c.aget(4, 0, 7, AGET_OBJ)            # kind 11: canvas.saveLayer(null, null), a layer for a masked part
+        c.const_4(7, 2); c.new_array(9, 7, STRARR); c.new_array(10, 7, OBJARR)
+        c.const_string(6, "android.graphics.RectF"); c.const_4(7, 0); c.aput(6, 9, 7, APUT_OBJ)
+        c.const_string(6, "android.graphics.Paint"); c.const_4(7, 1); c.aput(6, 9, 7, APUT_OBJ)
+        c.const_string(6, "saveLayer"); c.invoke(STATIC, "inv", [4, 6, 9, 10])
+        c.ret_void()
+        c.label("not11")
         c.lit(7, 8); c.if2(IFNE, 6, 7, "not8")
         c.lit(7, 22); c.aput(5, 0, 7, APUT_OBJ)
         c.ret_void()
@@ -633,7 +643,7 @@ def emit():
         c.label("draw")
         c.lit(7, 21); c.aget(4, 0, 7, AGET_OBJ)
         c.ifz(IFNEZ, 4, "res")
-        c.ret_void()                                          # no package told yet
+        c.goto_("fin")                                        # no package told yet
         c.label("res")
         c.const_4(7, 3); c.new_array(9, 7, STRARR); c.new_array(10, 7, OBJARR)
         c.const_string(6, "java.lang.String")
@@ -645,16 +655,22 @@ def emit():
         c.const_string(6, "getIdentifier"); c.invoke(STATIC, "inv", [4, 6, 9, 10]); c.move_result(11, True)
         c.check_cast(11, INTG); c.invoke(VIRT, "int.intval", [11]); c.move_result(6)
         c.ifz(IFNEZ, 6, "found")
-        c.ret_void()
+        c.goto_("fin")
         c.label("found")
         c.const_string(6, "getDrawable"); c.const_string(7, "int"); c.invoke(STATIC, "w1", [4, 6, 7, 11]); c.move_result(8, True)
         c.const_string(6, "mutate"); c.invoke(STATIC, "os", [8, 6]); c.move_result(8, True)   # its own state: the tint stays on it
+        c.const_4(7, 0); c.aget(6, 2, 7, AGET); c.lit(7, 12); c.if2(IFNE, 6, 7, "notmask")
+        c.const_string(6, "getPaint"); c.invoke(STATIC, "os", [8, 6]); c.move_result(11, True)    # kind 12, the mask (a PNG:
+        c.lit(7, 24); c.aget(12, 0, 7, AGET_OBJ)              # a BitmapDrawable): drawn DST_IN over the layer
+        c.const_string(6, "setXfermode"); c.const_string(7, "android.graphics.Xfermode"); c.invoke(STATIC, "w1", [11, 6, 7, 12])
+        c.move_result(11, True)                               # read: no result left over where the paths meet
+        c.label("notmask")
         c.const_4(7, 2); c.aget(6, 2, 7, AGET)
         c.ifz(IFEQZ, 6, "bounds")
         c.invoke(STATIC, "int.value", [6]); c.move_result(12, True)
         c.lit(7, 23); c.aget(13, 0, 7, AGET_OBJ)
         c.const_string(9, "setColorFilter"); c.const_string(10, "int"); c.const_string(11, "android.graphics.PorterDuff$Mode")
-        c.invoke_range(STATIC_RANGE, "w2", 8, 6)
+        c.invoke_range(STATIC_RANGE, "w2", 8, 6); c.move_result(9, True)     # read: "bounds" is a meeting point
         c.label("bounds")
         c.const_4(7, 3); c.aget(6, 2, 7, AGET)
         c.ifz(IFLTZ, 6, "fill")
@@ -693,7 +709,12 @@ def emit():
         c.const_4(7, 1); c.aput(11, 10, 7, APUT_OBJ); c.const_4(7, 2); c.aput(11, 10, 7, APUT_OBJ)
         c.const_string(6, "rotate"); c.invoke(STATIC, "inv", [4, 6, 9, 10])        # about the centre
         c.const_string(6, "draw"); c.const_string(7, "android.graphics.Canvas"); c.invoke(STATIC, "w1", [8, 6, 7, 4])
-        c.const_string(6, "restore"); c.invoke(STATIC, "os", [4, 6])
+        c.const_string(6, "restore"); c.invoke(STATIC, "os", [4, 6]); c.move_result(6, True)
+        c.label("fin")                                        # kind 12: the layer of kind 11 merged, the mask drawn or not
+        c.const_4(7, 0); c.aget(6, 2, 7, AGET); c.lit(7, 12); c.if2(IFNE, 6, 7, "end")
+        c.const_4(7, 4); c.aget(4, 0, 7, AGET_OBJ)
+        c.const_string(6, "restore"); c.invoke(STATIC, "os", [4, 6]); c.move_result(6, True)
+        c.label("end")
         c.ret_void()
         m.append(("facem", c))
 
@@ -715,10 +736,10 @@ def emit():
         # 8 the header's bytes, 9 its ints, 10 getPixels, 11 drawText, 12 eraseColor, 13 setTextSize, 14 setColor,
         # 15 createBitmap, 16 Canvas.drawColor, 17 PorterDuff.Mode.CLEAR, 18 BitmapFactory.decodeByteArray, 19 the Rect
         # constructor, 20 Canvas.drawBitmap(Bitmap, Rect, Rect, Paint), 21 the clock faces' Resources (facem), 22 their
-        # package's name, 23 PorterDuff.Mode.SRC_IN (their tints)
+        # package's name, 23 PorterDuff.Mode.SRC_IN (their tints), 24 a PorterDuffXfermode(DST_IN) (their masks)
         # w=0 h=1 ms=2 t=3 k=4 x=5 y=6 z=7
         c = Code(8, 2)
-        c.lit(4, 24); c.new_array(2, 4, OBJARR)
+        c.lit(4, 25); c.new_array(2, 4, OBJARR)
 
         def meth(at, cls, name, ps):
             c.lit(4, len(ps)); c.new_array(3, 4, STRARR)
@@ -755,6 +776,16 @@ def emit():
         c.const_string(4, "SRC_IN"); c.invoke(VIRT, "cls.getf", [3, 4]); c.move_result(3, True)
         c.const_4(4, 0); c.invoke(VIRT, "f.get", [3, 4]); c.move_result(3, True)
         c.lit(4, 23); c.aput(3, 2, 4, APUT_OBJ)
+        # new PorterDuffXfermode(PorterDuff.Mode.DST_IN): a mask drawn with it keeps what is under it where it is opaque
+        c.const_string(3, "android.graphics.PorterDuff$Mode"); c.invoke(STATIC, "cls.forName", [3]); c.move_result(3, True)
+        c.const_string(4, "DST_IN"); c.invoke(VIRT, "cls.getf", [3, 4]); c.move_result(4, True)
+        c.const_4(5, 0); c.invoke(VIRT, "f.get", [4, 5]); c.move_result(4, True)
+        c.const_4(5, 1); c.new_array(6, 5, CLSARR); c.const_4(5, 0); c.aput(3, 6, 5, APUT_OBJ)
+        c.const_string(7, "android.graphics.PorterDuffXfermode"); c.invoke(STATIC, "cls.forName", [7]); c.move_result(7, True)
+        c.invoke(VIRT, "cls.getc", [7, 6]); c.move_result(7, True)
+        c.const_4(5, 1); c.new_array(6, 5, OBJARR); c.const_4(5, 0); c.aput(4, 6, 5, APUT_OBJ)
+        c.invoke(VIRT, "ctor.newi", [7, 6]); c.move_result(7, True)
+        c.lit(5, 24); c.aput(7, 2, 5, APUT_OBJ)
         c.binop(MUL, 4, 0, 1); c.new_array(3, 4, INTS); c.const_4(4, 6); c.aput(3, 2, 4, APUT_OBJ)    # base
         c.lit(4, 20); c.new_array(3, 4, BYTES); c.lit(4, 8); c.aput(3, 2, 4, APUT_OBJ)                 # the header's bytes
         c.const_4(4, 5); c.new_array(3, 4, INTS); c.lit(4, 9); c.aput(3, 2, 4, APUT_OBJ)                # its ints
@@ -1110,6 +1141,11 @@ REFLECTED = [
     (CANVAS, "save", [], False),
     (CANVAS, "rotate", ["F", "F", "F"], False),
     (CANVAS, "restore", [], False),
+    # a masked part (stellar's sky disc): a layer, the mask drawn DST_IN through its BitmapDrawable's paint
+    (CANVAS, "saveLayer", ["Landroid/graphics/RectF;", PAINT], False),
+    ("Landroid/graphics/drawable/BitmapDrawable;", "getPaint", [], False),
+    (PAINT, "setXfermode", ["Landroid/graphics/Xfermode;"], False),
+    ("Landroid/graphics/PorterDuffXfermode;", "<init>", [PDMODE], False),
 ]
 REFLECTED_FIELDS = [
     (DINFO, "logicalWidth", "I"),
@@ -1119,6 +1155,7 @@ REFLECTED_FIELDS = [
     (PALIGN, "CENTER", PALIGN),
     (PDMODE, "CLEAR", PDMODE),
     (PDMODE, "SRC_IN", PDMODE),
+    (PDMODE, "DST_IN", PDMODE),
 ]
 CONSTANTS = [
     ("Landroid/graphics/PixelFormat;", "OPAQUE", OPAQUE),

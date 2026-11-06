@@ -119,11 +119,19 @@ class BitmapCanvas(Fake):                                      # new Canvas(bitm
         self.bmp.px[t * self.bmp.w + l] = i32(0xff000000 | bm.data[0])
         self.log("image", bytes(bm.data), dst.box, paint.flags)
 
-    rot, saved = None, 0
+    rot, saved, layers = None, 0, 0
 
     def save(self): self.saved += 1; return self.saved
     def rotate(self, d, px, py): assert self.saved; self.rot = (d, px, py)
-    def restore(self): assert self.saved; self.saved -= 1; self.rot = None
+
+    def restore(self):                                         # a save's, or (none open) a saveLayer's: merged
+        if self.saved: self.saved -= 1; self.rot = None; return
+        assert self.layers, "restore without a save or a layer"
+        self.layers -= 1; self.log("merge")
+
+    def saveLayer(self, rect, paint):
+        assert rect is None and paint is None and not self.saved
+        self.layers += 1; self.log("savelayer"); return self.layers
 
     def drawText(self, s, x, y, paint):
         assert isinstance(paint, Paint) and paint.size is not None and paint.color is not None
@@ -152,7 +160,7 @@ class Config(Fake):
 class Resources(Fake):
     JAVA = "android.content.res.Resources"
     SYSTEM = None
-    NAMES = {"hand": 0x7f020001, "dial": 0x7f020002, "dot": 0x7f020003}
+    NAMES = {"hand": 0x7f020001, "dial": 0x7f020002, "dot": 0x7f020003, "sky": 0x7f020004, "mask": 0x7f020005}
 
     def __init__(self, am=None, dm=None, cf=None):
         self.am, self.dm, self.cf = am, dm, cf
@@ -181,12 +189,18 @@ class Drawable(Fake):                                          # "dot" has a siz
     def getIntrinsicWidth(self): return 40 if self.name == "dot" else -1
     def getIntrinsicHeight(self): return 20 if self.name == "dot" else -1
     def setBounds(self, l, t, r, b): self.box = (l, t, r, b)
+    paint = None
+
+    def getPaint(self):
+        if self.paint is None: self.paint = Paint(1)
+        return self.paint
 
     def draw(self, canvas):
         assert isinstance(canvas, BitmapCanvas) and self.mutated
         l, t, r, b = self.box
         canvas.bmp.px[t * canvas.bmp.w + l] = i32(0xff000000 | len(self.name))
-        self.log("drawable", self.name, self.box, self.tint, canvas.rot)
+        xfer = self.paint.xfer.mode if self.paint is not None and self.paint.xfer is not None else None
+        self.log("drawable", self.name, self.box, self.tint, canvas.rot, *((xfer, canvas.layers) if xfer else ()))
 
 
 class Rect(Fake):
@@ -211,9 +225,20 @@ class Paint(Fake):
         self.flags, self.size, self.color, self.align = flags, None, None, None
         self.log("paint", flags)
 
+    xfer = None
+
+    def setXfermode(self, x): assert isinstance(x, Xfermode); self.xfer = x
     def setTextAlign(self, a): self.align = a
     def setTextSize(self, s): self.size = s
     def setColor(self, c): self.color = c
+
+
+class Xfermode(Fake):                                          # new PorterDuffXfermode(mode)
+    JAVA = "android.graphics.PorterDuffXfermode"
+    AS = ("Landroid/graphics/Xfermode;",)
+
+    def __init__(self, mode):
+        self.mode = mode
 
 
 class Canvas(Fake):                                            # what lockCanvas returns: Surface's own subclass
@@ -254,15 +279,16 @@ class Surface(Fake):
 
 class JavaEnv(dexrun.JavaEnv):
     CLASSES = (WindowManager, DisplayInfo, DisplayManagerGlobal, SurfaceSession, SurfaceControl, SurfaceControlBuilder,
-               Surface, Canvas, Bitmap, BitmapCanvas, Paint, Rect, AssetManager, Resources, Drawable, Metrics, Config)
+               Surface, Canvas, Bitmap, BitmapCanvas, Paint, Rect, AssetManager, Resources, Drawable, Metrics, Config, Xfermode)
     NAMES = ("android.os.ServiceManager", "android.view.IWindowManager$Stub", "android.os.IBinder",
              "android.graphics.Rect", "android.graphics.Paint", "[I", "android.graphics.Bitmap$Config",
              "android.graphics.Paint$Align", "java.lang.System", "java.lang.Object", "android.graphics.PorterDuff$Mode",
-             "android.graphics.BitmapFactory", "[B")
+             "android.graphics.BitmapFactory", "[B", "android.graphics.RectF", "android.graphics.Xfermode")
 
     def static_field(self, cls, name):
         assert (cls, name) in (("android.graphics.Bitmap$Config", "ARGB_8888"), ("android.graphics.Paint$Align", "CENTER"),
-                               ("android.graphics.PorterDuff$Mode", "CLEAR"), ("android.graphics.PorterDuff$Mode", "SRC_IN")), (cls, name)
+                               ("android.graphics.PorterDuff$Mode", "CLEAR"), ("android.graphics.PorterDuff$Mode", "SRC_IN"),
+                               ("android.graphics.PorterDuff$Mode", "DST_IN")), (cls, name)
         return name
 
     def __init__(self, display, stdin=(), api9=False):
@@ -428,6 +454,19 @@ def main():
     check(seq == ["drawable", ("text", "6", 116.0, 252.0, 26.0), "drawable", "post", ("text", "7", 364.0, 252.0, 26.0), "post"],
           f"faces: the date (kind 9) drawn at its point between the parts, shown once at kind 5; kind 2 at a point ({seq})")
     check(("text", "6", 116.0, 252.0, 26.0, day, "CENTER") in env.log, "the date: its colour, Paint.Align.CENTER")
+
+    # a masked part (stellar's sky disc): 11 a layer, 4 the part into it (rotated), 12 its mask (filling, DST_IN) and the
+    # layer merged; then the rest as before.  A mask the package lacks: the layer merged all the same
+    stream = (table + msg(7, payload=b"/system/faces.apk") + msg(8, payload=b"com.example.faces") + msg(6)
+              + msg(11) + msg(4, 18000, 0, -1, b"sky") + msg(12, 0, 0, -1, b"mask") + msg(4, 0, 0, -1, b"hand")
+              + msg(11) + msg(4, 0, 0, -1, b"sky") + msg(12, 0, 0, -1, b"nothing") + msg(5))
+    env = run(["10", "ctor", "ring"], (480, 480, 0), [stream])
+    seq = [e[:2] + e[5:] if e[0] == "drawable" else e[:1] for e in env.log if e[0] in ("drawable", "savelayer", "merge", "post")]
+    check(seq == [("savelayer",), ("drawable", "sky"), ("drawable", "mask", "DST_IN", 1), ("merge",), ("drawable", "hand"),
+                  ("savelayer",), ("drawable", "sky"), ("merge",), ("post",)],
+          f"masked: the part in a layer of its own, its mask DST_IN over it, the layer merged; a missing mask merged too ({seq})")
+    sky = [e for e in env.log if e[0] == "drawable" and e[1] == "sky"][0]
+    check(sky[4] == (180.0, 240.0, 240.0), f"masked: the part rotated about the centre, the mask not ({sky})")
 
     env = run(["10", "ctor", "ring"], (480, 480, 0), [table[:10]])
     check(env.out == ["ready 480 480"] and not [e for e in env.log if e[0] == "draw"],

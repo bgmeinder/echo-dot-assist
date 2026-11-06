@@ -55,7 +55,7 @@ int main(void)
     }
     if (clockface_count() > 1) {
         struct cf_op ops[16]; int k = clockface_ops(1, 1, 0, 1, &tm, 0, ops, 16);
-        for (int i = 0; i < k; i++) printf("top %s%s\n", ops[i].name, ops[i].text);
+        for (int i = 0; i < k; i++) printf("top %s%s%s%s\n", ops[i].name, ops[i].text, ops[i].mask[0] ? " mask " : "", ops[i].mask);
     }
     size_t bl = 0; unsigned char *bp = clockface_count() > 1 ? clockface_background_thumb(1, 1, &bl) : NULL;
     printf("bgthumb %zu %s\n", bl, bp && bl >= 4 && !memcmp(bp + 1, "PNG", 3) ? "ok" : "none");
@@ -87,6 +87,7 @@ def build(path, damaged=False):
     ]}
     digital = {"type": "ClockFace", "id": "zen_digital", "is_analog": False, "layers": [{"type": "TextClockLayer"}]}
     thin = {"type": "ClockFace", "id": "zen_analog_thin", "is_analog": True, "layers": [
+        {"type": "MaskedRotatingHandLayer", "src": "img_sky", "mask": "bg_mask", "hand_rotation": "HOUR_24"},
         {"type": "RotatingHandLayer", "src": "hand_thin", "hand_rotation": "MINUTE"}]}
     files = {
         "assets/raw/clock_template_zen": {"id": "zen", "face_ids": ["zen_digital", "zen_analog_bold", "zen_analog_thin"],
@@ -160,7 +161,8 @@ def main():
         dates = [l for l in out if l.startswith("date ")]
         check("the day of the month centred on the window's point, 26 px, white by day, its night colour by night",
               dates == ["date 0 6 240 164 26 ffffffff", "date 1 6 240 164 26 ff009097"])
-        check("the thin dial: its own hand on sand, no date window to show", [l for l in out if l.startswith("top ")] == ["top bg_sand_day", "top hand_thin"])
+        check("the thin dial: its sky through its mask (turned once a day), its own hand on sand, no date window to show",
+              [l for l in out if l.startswith("top ")] == ["top bg_sand_day", "top img_sky mask bg_mask", "top hand_thin"])
         check("a background's picture from its styled_background, in another res/drawable folder", "bgthumb 10 ok" in out)
         check("a background without one: none", "bgthumb0 none" in out)
         build(pkg, damaged=True)

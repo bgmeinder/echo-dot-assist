@@ -14,9 +14,10 @@
 
 /* one thing for the renderer to draw: drawable `name` of the package, rotated by rot (hundredths of a degree,
  * clockwise, about the screen's centre), tinted (0xAARRGGBB, 0: as it is); centred on (cx, cy) of the 480 x 480 face
- * at its own size, or filling the face when cx is -1.  Or, text[0] set: that text (the date window's day) centred on
- * cx with its baseline at cy, size px high, in colour tint */
-struct cf_op { char name[96]; int rot; unsigned tint; int cx, cy; char text[8]; int size; };
+ * at its own size, or filling the face when cx is -1; mask[0] set: shown only where drawable `mask` (filling the face,
+ * not rotated) is opaque (stellar's sky disc through its window).  Or, text[0] set: that text (the date window's day)
+ * centred on cx with its baseline at cy, size px high, in colour tint */
+struct cf_op { char name[96]; int rot; unsigned tint; int cx, cy; char text[8]; int size; char mask[96]; };
 
 int clockface_count(void);                     /* templates with an analog face (0: no package, or none) */
 const char *clockface_package(void);           /* the package's name, for the renderer's Resources ("" none) */

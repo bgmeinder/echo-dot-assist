@@ -745,7 +745,10 @@ static int face_draw(int fd, int tmpl, const struct tm *tm, int new_minute)
             continue;
         }
         int c = ops[i].cx < 0 ? -1 : (ops[i].cx & 0xffff) << 16 | (ops[i].cy & 0xffff);
+        /* a masked part: a layer of its own (11), the part (4), its mask drawn DST_IN and the layer merged (12) */
+        if (ops[i].mask[0] && send_msg(fd, 11, 0, 0, 0, NULL, 0)) return -1;
         if (send_msg(fd, 4, ops[i].rot, (int)ops[i].tint, c, ops[i].name, strlen(ops[i].name))) return -1;
+        if (ops[i].mask[0] && send_msg(fd, 12, 0, 0, -1, ops[i].mask, strlen(ops[i].mask))) return -1;
     }
     return send_msg(fd, 5, 0, 0, 0, NULL, 0) ? -1 : 0;
 }
