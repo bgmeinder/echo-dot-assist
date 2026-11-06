@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "sbc.h"
+#include "board.h"
 #include "../third_party/freeaptx.h"
 
 typedef struct OpusDecoder OpusDecoder;
@@ -42,8 +43,22 @@ static int one_bit(unsigned v) { return v && !(v & (v - 1)); }
 static const unsigned char sbc_caps[] = { 0x30 | 0x0f, 0xf0 | 0x0c | 0x03, 2, 53 };  /* 44.1/48 kHz, all modes; bitpool 2..53 */
 static struct sbc sbc;
 
+/* aptX's: vendor ID, codec ID (little endian), frequency (high nibble: 44.1 kHz 0x2, 48 kHz 0x1), channel mode
+ * (stereo); not const, aptx_usable narrows the frequencies */
+static unsigned char aptx_caps[] = { 0x4f, 0, 0, 0, 0x01, 0x00, 0x30 | 0x02 };
+
 static int always(void) { return 1; }
-static int never(void) { return 0; }                /* an endpoint we keep but do not offer */
+static int never(void) { return 0; }
+/* aptX's rates at 48 kHz (its sources send 48 kHz where they can): HD 6 bytes, aptX 4 bytes per 4 stereo samples */
+static int hd_usable(void) { return !board.a2dp_max_kbps || board.a2dp_max_kbps >= 576; }
+/* aptX is 4 bytes per 4 stereo samples: 384 kbit/s at 48 kHz, 352 at 44.1.  Under a cap between the two only 44.1 kHz
+ * is offered (rook: ~50 KB/s is all its Bluetooth carries, Wi-Fi on or off; 48 kHz needs ~49.5 with headers and ran dry
+ * whenever the link dipped, 2026-11-06) */
+static int aptx_usable(void)
+{
+    if (board.a2dp_max_kbps && board.a2dp_max_kbps < 384) aptx_caps[6] = 0x20 | 0x02;
+    return !board.a2dp_max_kbps || board.a2dp_max_kbps >= 352;
+}
 
 static int sbc_check(const unsigned char *c, unsigned n)
 {
@@ -184,13 +199,12 @@ static void aac_packet(const unsigned char *p, size_t n, a2dp_pcm_fn *out)
 /* ---------------------------------------------------------------- aptX, aptX HD */
 
 /* vendor ID, codec ID (little endian), then frequency (high nibble: 44.1 kHz 0x2, 48 kHz 0x1) and channel mode (stereo) */
-static const unsigned char aptx_caps[] = { 0x4f, 0, 0, 0, 0x01, 0x00, 0x30 | 0x02 };
 static const unsigned char aptx_hd_caps[] = { 0xd7, 0, 0, 0, 0x24, 0x00, 0x30 | 0x02, 0, 0, 0, 0 };
 static struct aptx_context *aptx; static unsigned aptx_rate; static int aptx_hd;
 
 static int aptx_check(const unsigned char *c, unsigned n, const unsigned char *caps, unsigned ncaps)
 {
-    return n >= ncaps && !memcmp(c, caps, 6) && (c[6] >> 4 == 1 || c[6] >> 4 == 2) && (c[6] & 15) == 2;
+    return n >= ncaps && !memcmp(c, caps, 6) && (c[6] >> 4 == 1 || c[6] >> 4 == 2) && (c[6] >> 4 & caps[6] >> 4) && (c[6] & 15) == 2;
 }
 static int aptx_check_sd(const unsigned char *c, unsigned n) { return aptx_check(c, n, aptx_caps, sizeof aptx_caps); }
 static int aptx_check_hd(const unsigned char *c, unsigned n) { return aptx_check(c, n, aptx_hd_caps, sizeof aptx_hd_caps); }
@@ -260,8 +274,8 @@ static void opus_packet(const unsigned char *p, size_t n, a2dp_pcm_fn *out)
 const struct a2dp_codec a2dp_codecs[] = {
     { "SBC", A2DP_SBC, sbc_caps, sizeof sbc_caps, always, sbc_check, sbc_open, sbc_packet, nothing },
     { "AAC", A2DP_AAC, aac_caps, sizeof aac_caps, aac_usable, aac_check, aac_open, aac_packet, aac_close },
-    { "aptX HD", A2DP_VENDOR, aptx_hd_caps, sizeof aptx_hd_caps, always, aptx_check_hd, aptx_open_hd, aptx_packet, aptx_close },
-    { "aptX", A2DP_VENDOR, aptx_caps, sizeof aptx_caps, always, aptx_check_sd, aptx_open_sd, aptx_packet, aptx_close },
+    { "aptX HD", A2DP_VENDOR, aptx_hd_caps, sizeof aptx_hd_caps, hd_usable, aptx_check_hd, aptx_open_hd, aptx_packet, aptx_close },
+    { "aptX", A2DP_VENDOR, aptx_caps, sizeof aptx_caps, aptx_usable, aptx_check_sd, aptx_open_sd, aptx_packet, aptx_close },
     { "Opus", A2DP_VENDOR, opus_caps, sizeof opus_caps, never, opus_check, opus_open, opus_packet, opus_close },
 };
 const int a2dp_ncodecs = sizeof a2dp_codecs / sizeof *a2dp_codecs;

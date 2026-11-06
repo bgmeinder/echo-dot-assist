@@ -300,7 +300,7 @@ unit-dha_jwt:
 	cc -O2 -Wall -Isrc/hassmic -Isrc/include tests/unit/dha_jwt_test.c src/hassmic/dha.c src/hassmic/afe_parcel.c src/hassmic/hash.c -o build/dha_jwt_test -ldl && build/dha_jwt_test build/dha_hal_fake.so && build/dha_jwt_test --service && build/dha_jwt_test --service2
 unit-a2dp_codecs:
 	@mkdir -p build
-	cc -O2 -Wall -Isrc/hassmic tests/unit/a2dp_codecs_test.c src/hassmic/a2dp_codecs.c src/hassmic/sbc.c src/third_party/freeaptx.c -lm -ldl -lopus -o build/a2dp_codecs_test && build/a2dp_codecs_test
+	cc -O2 -Wall -Isrc/hassmic tests/unit/a2dp_codecs_test.c src/hassmic/a2dp_codecs.c devices/$(DEVICE)/board.c src/hassmic/sbc.c src/third_party/freeaptx.c -lm -ldl -lopus -o build/a2dp_codecs_test && build/a2dp_codecs_test
 unit-sbc:
 	if command -v sbcenc >/dev/null; then tests/unit/sbc_ref.sh; else echo "sbc: sbcenc/sbcdec (package sbc) missing, skipped"; fi
 unit-web_crypto:

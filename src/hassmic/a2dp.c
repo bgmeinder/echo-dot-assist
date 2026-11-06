@@ -25,6 +25,7 @@
  * to a Bluetooth speaker" below.
  */
 #include "a2dp.h"
+#include "board.h"
 #include <errno.h>
 #include <math.h>
 #include <fcntl.h>
@@ -49,7 +50,9 @@
 #define MAX_CHANS 6                     /* per link: SDP, AVDTP signalling + media, and room for a retry */
 #define MAX_KEYS 8
 #define RX_MTU 1024                     /* what we receive per L2CAP frame; phones size their media packets to it */
-#define PREBUF_MS 150                   /* jitter buffer while playing: Wi-Fi shares the antenna and delays packets */
+/* jitter buffer while playing: Wi-Fi shares the antenna and delays packets; a board whose radio leaves longer gaps
+ * (rook: its Broadcom chip's Wi-Fi and Bluetooth on one antenna) asks for more (board.a2dp_buffer_ms) */
+#define PREBUF_MS (board.a2dp_buffer_ms ? board.a2dp_buffer_ms : 150)
 #define MIXER_US 60000                  /* kept queued in the mixer beyond that */
 #define OUTPUT_MS 70                    /* mixer, DAC, amplifier (measured for Sendspin, see sendspin.c) */
 #define CHUNK_MS 10
@@ -526,9 +529,16 @@ static void sdp_rx(struct link *l, struct chan *c, const unsigned char *p, size_
 static int16_t ring[RING_FRAMES * 2];
 static size_t r_head, r_count; static unsigned r_rate;  /* r_lock */
 static long r_dropped;
+static long long in_t0, in_frames;                     /* r_lock: when the stream's audio began coming, frames since */
 static pthread_mutex_t r_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t r_cond = PTHREAD_COND_INITIALIZER;
 static atomic_int streaming;                            /* AVDTP says the source plays */
+static atomic_llong last_rx;                            /* when the last media packet came (ms): told when the buffer runs dry */
+/* Where a phone's audio can go missing on its way in, counted on ble.c's thread and logged by media_rx every 10 s while
+ * streaming: each stage that drops something says so.  The Echo Spot's aptX came short of real time with about the
+ * right bytes on its UART (2026-11-06): lost on the air or in here, these tell which */
+static struct { long acl, acl_bytes, sdus, media, media_bytes, frames, short_, overlap, overflow, orphan; } rxs;
+extern long ble_resync_bytes;                           /* ble.c: bytes skipped to find the next H4 packet */
 static atomic_int gap_max, gaps_long, dry_count;       /* per log interval: longest pause between media packets (ms),
                                                            pauses over 100 ms, times the buffer ran dry */
 
@@ -538,7 +548,15 @@ static atomic_llong button_paused_at;                   /* the action button pau
 static void ring_push(const int16_t *pcm, unsigned frames, unsigned ch, unsigned rate)
 {
     pthread_mutex_lock(&r_lock);
+    static long long last_push;
+    long long now = ms();
+    rxs.frames += frames;
+    /* a pause (the phone stops sending without suspending the stream) starts the clock's measurement afresh: counted
+     * through, it read as a source 0.5 % slow (2026-11-06) */
+    if (rate != r_rate || now - last_push > 1000) in_t0 = 0;
     if (rate != r_rate) { r_rate = rate; r_count = 0; }
+    last_push = now;
+    if (!in_t0) { in_t0 = now; in_frames = 0; } else in_frames += frames;     /* the first packet came at 0 */
     for (unsigned i = 0; i < frames; i++) {
         if (r_count == RING_FRAMES) { r_dropped++; continue; }
         size_t at = (r_head + r_count) % RING_FRAMES * 2;
@@ -570,7 +588,13 @@ static void *player(void *arg)
         prime = (size_t)rr * (PREBUF_MS + MIXER_US / 1000) / 1000;
         if (!rr || (!primed && have < prime) || !have) {
             pthread_mutex_unlock(&r_lock);
-            if (primed && !have) { primed = 0; if (atomic_load(&streaming)) { atomic_fetch_add(&dry_count, 1); fprintf(stderr, "a2dp: buffer ran dry\n"); } }
+            if (primed && !have) { primed = 0; if (atomic_load(&streaming)) {
+                atomic_fetch_add(&dry_count, 1);
+                /* whether the radio paused (a packet long ago) or the player ran ahead (packets coming, the output taking
+                 * more than real time): the two sound alike */
+                fprintf(stderr, "a2dp: buffer ran dry (last packet %lld ms ago, %lld ms queued in the output)\n",
+                        ms() - atomic_load(&last_rx), bt_queued_us() / 1000);
+            } }
             if (open && !atomic_load(&streaming) && (quiet ? ms() - quiet > 3000 : (quiet = ms(), 0))) {
                 bt_close(); open = 0; fprintf(stderr, "a2dp: output closed\n");
             }
@@ -580,11 +604,24 @@ static void *player(void *arg)
         quiet = 0;
         /* The source's clock against the mixer's (a phone was 0.2 % fast): play the input slightly faster or slower,
          * resampled (resample.h: cubic, its position carried from block to block; linear dipped the treble by up to
-         * 1.3 dB at 8 kHz every few hundred frames at that drift), so the buffer stays near PREBUF_MS.  base follows the
-         * long-term drift, the error term the rest; both stay far below audible pitch changes. */
+         * 1.3 dB at 8 kHz every few hundred frames at that drift), so the buffer stays near PREBUF_MS.  base is the
+         * long-term drift, the error term the rest; both stay far below audible pitch changes.  base comes from what
+         * the source sent: frames over time, in the windows below.  It was the buffer's error summed up, which ran
+         * away to the 1 % limit on the Echo Spot, whose radio pauses and then bursts: the buffer refilled past its mark
+         * after every dry-out and the low stretches ended in one, never summed, so the player ran 1 % fast and dried
+         * out 8 times a minute on either Wi-Fi driver (2026-11-06). */
         avg = 0.98 * avg + 0.02 * ((double)have * 1000 / rr);
         double err = avg - PREBUF_MS, ratio;
-        base += err * 1e-7; base = base < 0.99 ? 0.99 : base > 1.01 ? 1.01 : base;
+        /* in windows of 5 s, smoothed; a window more than 1 % off is the phone starting up or bursting, not its clock
+         * (a Pixel's first 10 s came at 44334 frames/s, then 47800-48750: averaged from the start the estimate sat at
+         * its -0.5 % limit for minutes, 2026-11-06) */
+        long long now_ms = ms(), el = in_t0 ? now_ms - in_t0 : 0;
+        if (el >= 5000) {
+            double w = (double)in_frames * 1000 / ((double)el * rr);
+            if (w > 0.99 && w < 1.01) base = 0.9 * base + 0.1 * w;
+            base = base < 0.995 ? 0.995 : base > 1.005 ? 1.005 : base;
+            in_t0 = now_ms; in_frames = 0;
+        }
         ratio = base + (err < -100 ? -100 : err > 100 ? 100 : err) * 2e-5;
         acc += chunk * ratio;
         size_t n = (size_t)acc;                             /* input frames for a block of `chunk` out */
@@ -776,8 +813,23 @@ static void media_rx(const unsigned char *p, size_t n)
     static long long last;
     long long t = ms();
     if (last && t - last < 5000) { int g = (int)(t - last); if (g > atomic_load(&gap_max)) atomic_store(&gap_max, g); if (g > 100) atomic_fetch_add(&gaps_long, 1); }
-    last = t;
+    last = t; atomic_store(&last_rx, t);
+    rxs.media++; rxs.media_bytes += (long)n;
     if (atomic_load(&streaming) && !atomic_load(&yielded)) sep_codec(av.sep)->packet(p, n, ring_push);
+    static long long stat_t0; static long resync0;
+    if (!stat_t0 || t - stat_t0 > 15000) { stat_t0 = t; resync0 = ble_resync_bytes; memset(&rxs, 0, sizeof rxs); }
+    else if (t - stat_t0 >= 10000) {
+        /* only a window where something went missing: dropped here, or the source's audio over 3 % short of real time
+         * (it could not get it across: the Spot's Wi-Fi on 2.4 GHz, 2026-11-06) */
+        double rate = rxs.frames * 1000.0 / (double)(t - stat_t0); unsigned rr = r_rate;
+        long dropped = rxs.short_ + rxs.overlap + rxs.overflow + rxs.orphan + (ble_resync_bytes - resync0);
+        if (dropped || (rr && rate < rr * 0.97))
+            fprintf(stderr, "a2dp: in %lld ms: ACL %ld (%ld B), L2CAP %ld, media %ld (%ld B), frames %ld (%.0f/s); dropped: "
+                            "short %ld, overlap %ld, overflow %ld, orphan %ld, resync %ld B\n",
+                    t - stat_t0, rxs.acl, rxs.acl_bytes, rxs.sdus, rxs.media, rxs.media_bytes, rxs.frames, rate,
+                    rxs.short_, rxs.overlap, rxs.overflow, rxs.orphan, ble_resync_bytes - resync0);
+        stat_t0 = t; resync0 = ble_resync_bytes; memset(&rxs, 0, sizeof rxs);
+    }
 }
 
 /* ---------------------------------------------------------------- AVRCP
@@ -1467,13 +1519,14 @@ int a2dp_acl(const unsigned char *p, size_t n)
     if (n < 4) return 0;
     struct link *l = link_by(u16(p) & 0x0fff); unsigned pb = p[1] >> 4 & 3; size_t len = u16(p + 2);
     if (!l) return 0;
-    if (len > n - 4) return 1;
+    rxs.acl++; rxs.acl_bytes += (long)n;
+    if (len > n - 4) { rxs.short_++; return 1; }
     p += 4;
-    if (pb != 1) { if (len < 4) return 1; l->rxwant = 4 + u16(p); l->rxlen = 0; }
-    else if (!l->rxwant) return 1;
-    if (l->rxlen + len > sizeof l->rx) { l->rxwant = 0; return 1; }
+    if (pb != 1) { if (len < 4) return 1; if (l->rxwant) rxs.overlap++; l->rxwant = 4 + u16(p); l->rxlen = 0; }
+    else if (!l->rxwant) { rxs.orphan++; return 1; }
+    if (l->rxlen + len > sizeof l->rx) { rxs.overflow++; l->rxwant = 0; return 1; }
     memcpy(l->rx + l->rxlen, p, len); l->rxlen += len;
-    if (l->rxlen >= l->rxwant) { l->rxwant = 0; l2_rx(l, l->rx, l->rxlen); }
+    if (l->rxlen >= l->rxwant) { l->rxwant = 0; rxs.sdus++; l2_rx(l, l->rx, l->rxlen); }
     return 1;
 }
 
@@ -1493,6 +1546,18 @@ int a2dp_event(const unsigned char *e, size_t n)
     const unsigned char *q = e + 2; size_t qn = n - 2; struct link *l;
     int pairing = atomic_load(&pairing_on);
     switch (e[0]) {
+    case 0x0b:                                              /* Read Remote Supported Features: status, handle, LMP features */
+        if (qn >= 11 && !q[0] && (l = link_by(u16(q + 1) & 0x0fff)))
+            fprintf(stderr, "a2dp: %012llx can EDR 2M %d 3M %d, 3-slot EDR %d, 5-slot EDR %d\n", (unsigned long long)l->addr,
+                    q[3 + 3] >> 1 & 1, q[3 + 3] >> 2 & 1, q[3 + 4] >> 7 & 1, q[3 + 5] & 1);
+        return 1;
+    case 0x1b:                                              /* Max Slots Change: handle, slots */
+        if (qn >= 3 && (l = link_by(u16(q) & 0x0fff))) fprintf(stderr, "a2dp: %012llx max slots %u\n", (unsigned long long)l->addr, q[2]);
+        return 1;
+    case 0x1d:                                              /* Connection Packet Type Changed: status, handle, type */
+        if (qn >= 5 && (l = link_by(u16(q + 1) & 0x0fff)))
+            fprintf(stderr, "a2dp: %012llx packet types 0x%04x (status 0x%02x)\n", (unsigned long long)l->addr, u16(q + 3), q[0]);
+        return 1;
     case EV_INQUIRY_COMPLETE: out_inquiry_done(); return 1;
     case EV_INQUIRY_RSSI: case EV_INQUIRY_EXT:              /* one response each: count, address, ... */
         if (qn >= 15 && q[0]) out_found(q + 1, qn - 1, e[0] == EV_INQUIRY_EXT);
@@ -1527,6 +1592,11 @@ int a2dp_event(const unsigned char *e, size_t n)
             l->used = 1; l->handle = u16(q + 1) & 0x0fff; l->addr = addr_of(q + 3); l->enc = q[10];
             fprintf(stderr, "a2dp: %012llx connected\n", (unsigned long long)l->addr);
             { unsigned char r[4] = { 0x01, 0, 0, 0 }; later_addr(OP_REMOTE_NAME, q + 3, r, 4); }   /* page scan R1, clock offset unknown */
+            /* every packet type, EDR's 2 and 3 Mbit/s included (as on links we open, OP_CREATE_CONN), and what the
+             * other side can: a link held to basic rate carries ~1 Mbit/s less what Wi-Fi takes of the antenna, about
+             * what a phone's aptX needs (the Echo Spot, 2026-11-06) */
+            { unsigned char d[4]; put16(d, l->handle); put16(d + 2, 0xcc18); later(0x040f, d, 4); }
+            { unsigned char d[2]; put16(d, l->handle); later(0x041b, d, 2); }
             if (is_speaker(l)) out_link_up(l, paged);
             return 1;
         }
@@ -1659,6 +1729,10 @@ int a2dp_setup(void)
     unsigned char b[248]; const char *name = core_name; size_t nl = strlen(name) < 232 ? strlen(name) : 232;
     a2dp_lost();
     if (hci_cmd(OP_READ_BUFFER, NULL, 0) == 0) { const unsigned char *r = hci_ret(); acl_len = u16(r); acl_num = u16(r + 3); }
+    if (hci_cmd(0x1003, NULL, 0) == 0) {                    /* Read Local Supported Features: the rates our side offers */
+        const unsigned char *f = hci_ret();
+        fprintf(stderr, "a2dp: controller EDR 2M %d 3M %d, 3-slot EDR %d, 5-slot EDR %d\n", f[3] >> 1 & 1, f[3] >> 2 & 1, f[4] >> 7 & 1, f[5] & 1);
+    }
     if (acl_len < 27) acl_len = 27;
     if (acl_len > 1021) acl_len = 1021;
     if (!acl_num) acl_num = 1;

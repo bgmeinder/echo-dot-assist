@@ -91,6 +91,7 @@ static atomic_llong quiet_until;                /* CLOCK_MONOTONIC ms: no scanni
 static char bdaddr[18];                         /* set once, before anything reads it */
 
 static unsigned char in[2048]; static size_t have;             /* H4 stream: reads may split or join packets */
+long ble_resync_bytes;                                          /* skipped to find a packet start: a2dp.c's rx counters */
 static int cc_op, cc_status;                                    /* last Command Complete / Status */
 static unsigned char cc_ret[72];                                /* its return parameters after the status */
 static struct ble_adv batch[BLE_BATCH]; static int nbatch; static struct timespec batch_t0;
@@ -1115,7 +1116,7 @@ static int pump(int ms)
         if (have < 1) break;
         if (in[0] == H4_EVT) { if (have < 3) break; len = 3 + in[2]; }
         else if (in[0] == H4_ACL) { if (have < 5) break; len = 5 + u16(in + 3); }
-        else { memmove(in, in + 1, --have); continue; }        /* not a packet start: resync (after a partial drain) */
+        else { memmove(in, in + 1, --have); ble_resync_bytes++; continue; }   /* not a packet start: resync (after a partial drain) */
         if (len > sizeof in) return -1;
         if (have < len) break;
         memcpy(pkt, in, len); memmove(in, in + len, have - len); have -= len;      /* handlers may pump again */

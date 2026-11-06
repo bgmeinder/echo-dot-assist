@@ -34,6 +34,12 @@ struct board {
     const char *bt_dev;
     const char *bt_service;
     const char *bt_mac;
+    /* the most a phone's codec may send, kbit/s (0: no limit): codecs above it are not offered, the phone takes AAC or
+     * SBC.  rook: its Broadcom chip's Bluetooth gets ~50 KB/s beside Wi-Fi on the one antenna, aptX at 48 kHz needs
+     * 384 kbit/s + headers (~49.5 KB/s) and ran dry every few seconds; aptX HD (576) every second (2026-11-05/06) */
+    int a2dp_max_kbps;
+    /* the phone's music buffered before playing, ms (0: 150); reported to the phone as delay, so video keeps in step */
+    int a2dp_buffer_ms;
 
     /* stock assets */
     const char *wake_id;            /* id of the firmware's own wake word model */

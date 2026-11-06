@@ -9,6 +9,8 @@ What changed for people using the Echo, newest first. Details and measurements a
   been found (issue #112). Echos that were updated recently may become unusable; the full extent is currently unknown.
   Until the cause is known, the setup says so and asks before it unlocks; the default answer is not to. If fastboot
   turns out locked after the unlock, it points to the issue before anyone runs the unlock again.
+- **Bluetooth music on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry every few
+  seconds where the phone's packets arrive unevenly.
 
 ## 2026-11-04
 

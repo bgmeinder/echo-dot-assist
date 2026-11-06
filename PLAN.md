@@ -2427,6 +2427,16 @@ Run in this order. Each step says what it proves.
       CA-signed certificate, self-signed refused, taken with the setting off (persisted), unreachable reports failure.
       Device (biscuit, 2026-10-13, announcements over its ESPHome API): raw.githubusercontent.com MP3 with checks on
       played; a self-signed server refused (curl 60), played with `https_verify=off`.  Open: a real HA over HTTPS.
+- [x] Bluetooth audio from phones: the source's clock measured, not summed (2026-11-06).  A Pixel's music skipped on
+      the Echo Spot; besides the radio (below), a2dp.c's player.
+      hassmic's estimate of the phone's clock summed the buffer's error and ran away to its 1 % limit (the buffer
+      refilled past its mark after every dry-out, the low stretches ended in one): the player 1 % fast, dry every
+      10-15 s.  Now frames over 5 s windows, smoothed, windows over 1 % off left out (a Pixel's first 10 s came at
+      44334 frames/s), restarted after a pause; reads -69..+55 ppm.  a2dp_buffer_ms 300 on rook (gaps to 140 ms).
+      Logged: once per link the phone's EDR and slots, every dry-out with the last packet's age and the output's queue,
+      a 10 s receive window only when something was dropped or over 3 % short.
+      a2dp_codecs.c: board.a2dp_max_kbps leaves out codecs above it (aptX HD 576, aptX 384 kbit/s at 48 kHz: 352 at
+      44.1 kHz offered alone under a cap between the two); board.a2dp_buffer_ms the jitter buffer (150 by default).
 - [x] Frozen at the first wake word after 18.6 h (2026-10-13, GitHub issue #31; Echo Dot 3 on 2026.10.12.210015, up
       ~24 h): wake word, wake sound, listening ring, then nothing; buttons dead (action logged, not acted on), no
       pipeline timeout, power cycle needed. HA ran a whole pipeline meanwhile. The log's last hassmic lines: `whisper:
