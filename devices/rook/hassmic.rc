@@ -1,0 +1,27 @@
+# Home Assistant satellite instead of Alexa.  Android 5.1's init reads no /system/etc/init/: this file goes into the
+# boot ramdisk as /hassmic.rc, imported by init.rc (scripts/mkbootroot.py --add hassmic.rc=... --import hassmic.rc,
+# from scripts/install-boot.sh).  Both services do nothing unless /data/local/hassmic/hassmic.conf exists; without it
+# boot.sh also turns Alexa's apps back on if alexa-off.sh had turned them off.
+# seclabel su: the domain adbd switches to with ro.secure=0 (the XDA root's policy); init may enter it by sepolicy.rules.
+
+service hassmic_fw /system/bin/sh /system/hassmic/boot.sh firewall
+    class main
+    user root
+    seclabel u:r:su:s0
+    disabled
+    oneshot
+
+service hassmic /system/bin/sh /system/hassmic/boot.sh satellite
+    class main
+    user root
+    seclabel u:r:su:s0
+    disabled
+    oneshot
+
+on boot
+    start hassmic_fw
+
+# Alexa on rook is Android apps, started by the framework: no init trigger to follow as on the Dots.  alexa-off.sh
+# disables them with pm, which needs the package manager up; boot_completed is when it is.
+on property:sys.boot_completed=1
+    start hassmic

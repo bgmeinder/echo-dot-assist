@@ -16,6 +16,8 @@
 # wrong.  Back to stock means flashing the firmware .bin in TWRP (system and boot together).
 #   install-boot.sh                 the Echo names itself (model and MAC address); name it in Home Assistant
 #   install-boot.sh --boot-only     only part 1: root adb, e.g. for scripts/deploy.sh trial runs before installing
+#   install-boot.sh --files-only    only part 2: the Echo boots the root boot image already and build/<codename>/ holds
+#                                   the binaries (built elsewhere: tools/devenv on a PC without the NDK or qemu)
 #   install-boot.sh --uninstall     Alexa's apps back on, hassmic off the system partition, cache and data wiped in TWRP
 #                                   (the root boot image stays); --uninstall --yes without asking
 set -e
@@ -41,20 +43,31 @@ boot_image() {
         die "no $SEPOLICY_TOOL (or not the pinned one): patch/magiskpolicy32 of donut's boot-root.zip ($DDIR/README.md)"
     [ -f $ADBD ] && [ "$(sha $ADBD)" = "$ADBD_SHA256" ] ||
         die "no $ADBD (or not the pinned one): sbin/adbd of the boot image in the model's own XDA boot-root.zip ($DDIR/README.md)"
-    [ -e $FW/rootfs/system/bin/linker ] || die "$FW/rootfs not unpacked: qemu runs magiskpolicy against its linker ($DDIR/README.md)"
-    { command -v qemu-arm > /dev/null || [ -x toolchain/qemu-arm ]; } || die "no qemu-arm (qemu user mode; $DDIR/setup.sh puts one in toolchain/)"
     python3 scripts/mkbootroot.py --extract $OUT/boot.stock.img sepolicy $OUT/sepolicy.stock
     rm -f $OUT/sepolicy.hassmic
     chmod 755 $SEPOLICY_TOOL
-    DEVICE=$DEVICE tools/qrun.sh -t 120 $SEPOLICY_TOOL --load $OUT/sepolicy.stock --apply $DDIR/sepolicy.rules \
-        --save $OUT/sepolicy.hassmic > $OUT/qrun.log 2>&1 || true
+    if [ -n "$SEPOLICY_RUNTIME" ]; then
+        # rook: Magisk's arm64 magiskpolicy under qemu-aarch64 against TWRP's bionic (device.conf says why; tools/twrp_bionic.py)
+        [ -x $SEPOLICY_RUNTIME/sbin/linker64 ] || die "no $SEPOLICY_RUNTIME: tools/twrp_bionic.py <twrp.img> $SEPOLICY_RUNTIME ($DDIR/README.md)"
+        command -v qemu-aarch64 > /dev/null || die "no qemu-aarch64 (qemu user mode)"
+        policy() { qemu-aarch64 -E LD_LIBRARY_PATH=/sbin -L $SEPOLICY_RUNTIME $SEPOLICY_TOOL "$@"; }
+    else
+        [ -e $FW/rootfs/system/bin/linker ] || die "$FW/rootfs not unpacked: qemu runs magiskpolicy against its linker ($DDIR/README.md)"
+        { command -v qemu-arm > /dev/null || [ -x toolchain/qemu-arm ]; } || die "no qemu-arm (qemu user mode; $DDIR/setup.sh puts one in toolchain/)"
+        policy() { DEVICE=$DEVICE tools/qrun.sh -t 120 $SEPOLICY_TOOL "$@"; }
+    fi
+    policy --load $OUT/sepolicy.stock --apply $DDIR/sepolicy.rules --save $OUT/sepolicy.hassmic > $OUT/qrun.log 2>&1 || true
     # qrun.sh says there why it did not run qemu (no user namespace: Ubuntu 24.04 and later)
     [ -s $OUT/sepolicy.hassmic ] ||
-        die "the policy patch failed (tools/qrun.sh $SEPOLICY_TOOL): $(grep '^qrun.sh' $OUT/qrun.log || tail -n 3 $OUT/qrun.log)"
-    DEVICE=$DEVICE tools/qrun.sh -t 120 $SEPOLICY_TOOL --load $OUT/sepolicy.hassmic --print-rules > $OUT/sepolicy.rules.txt 2>/dev/null || true
+        die "the policy patch failed ($SEPOLICY_TOOL): $(grep '^qrun.sh' $OUT/qrun.log || tail -n 3 $OUT/qrun.log)"
+    policy --load $OUT/sepolicy.hassmic --print-rules > $OUT/sepolicy.rules.txt 2>/dev/null || true
     grep -qx 'permissive adbd' $OUT/sepolicy.rules.txt && grep -q '^allow init su process' $OUT/sepolicy.rules.txt ||
         die "the patched policy lacks its rules ($OUT/sepolicy.rules.txt)"
-    python3 scripts/mkbootroot.py $OUT/boot.stock.img $IMG --sepolicy $OUT/sepolicy.hassmic --adbd $ADBD --no-verity > /dev/null
+    # BOOT_PROPS (device.conf): lines for default.prop (rook: ro.build.tags=test-keys, or stock's fosflags script strips adb);
+    # BOOT_RC: hassmic.rc into the ramdisk, imported by init.rc, where init reads no /system/etc/init/ (Android 5.1)
+    python3 scripts/mkbootroot.py $OUT/boot.stock.img $IMG --sepolicy $OUT/sepolicy.hassmic --adbd $ADBD --no-verity \
+        $(for p in $BOOT_PROPS; do printf ' --prop %s' "$p"; done) \
+        ${BOOT_RC:+--add hassmic.rc=$DDIR/hassmic.rc --import hassmic.rc} > /dev/null
     echo "boot image: $IMG ($(sha $IMG | cut -c1-16)...)"
 }
 
@@ -201,39 +214,48 @@ if [ "$1" = --uninstall ]; then
     exit 0
 fi
 
-boot_image
-[ "$1" = --boot-only ] && BOOT_ONLY=1 && shift
-# TWRP's "Keep System Read only?" screen: answering it restarts TWRP's USB, and adb is gone for a few seconds
-if ! on_adb; then
-    echo "waiting for the Echo on adb (TWRP asking \"Keep System Read only?\" on its screen: tap \"Keep Read Only\") ..."
-    wait_for 120 on_adb || true
+# --files-only: the Echo boots the root boot image already and build/<codename>/ holds the binaries (made elsewhere,
+# e.g. in the build container, tools/devenv): part 2 alone, no qemu, fastboot or NDK needed here
+if [ "$1" = --files-only ]; then
+    FILES_ONLY=1; shift
+else
+    boot_image
+    [ "$1" = --boot-only ] && BOOT_ONLY=1 && shift
+    # TWRP's "Keep System Read only?" screen: answering it restarts TWRP's USB, and adb is gone for a few seconds
+    if ! on_adb; then
+        echo "waiting for the Echo on adb (TWRP asking \"Keep System Read only?\" on its screen: tap \"Keep Read Only\") ..."
+        wait_for 120 on_adb || true
+    fi
+    if boot_is_ours; then
+        echo "boot partition holds this boot image already"
+        [ "$(state)" = recovery ] && flash_boot --boot-only      # in TWRP: boot it
+    else flash_boot; fi
 fi
-if boot_is_ours; then
-    echo "boot partition holds this boot image already"
-    [ "$(state)" = recovery ] && flash_boot --boot-only      # in TWRP: boot it
-else flash_boot; fi
 wait_for 600 booted || die "the Echo is not booted with adb"
-[ "$(t id -u)" = 0 ] && [ "$(t cat /proc/self/attr/current | tr -d '\0')" = u:r:su:s0 ] ||
+# "uid=0(root) ...": Fire OS 5's toolbox id ignores -u (rook), toybox's prints the number
+case "$(t id -u)" in 0|uid=0\(*) ;; *) die "adb is not a root shell ($(t id))";; esac
+[ "$(t cat /proc/self/attr/current | tr -d '\0')" = u:r:su:s0 ] ||
     die "adb is not a root shell in the su domain ($(t id); $(t cat /proc/self/attr/current | tr -d "\\0"))"
 echo "root adb: ok"
 [ -n "$BOOT_ONLY" ] && exit 0
 
 # --- part 2: the files, from the running OS (as install-system.sh does on donut)
 device_check_firmware
-build_binaries                          # built here or this commit's release build (PREBUILT, scripts/lib/build.sh)
+if [ -n "$FILES_ONLY" ]; then [ -s $OUT/hassmic ] || die "no $OUT/hassmic: build it first (make DEVICE=$DEVICE)"   # -s: no x bit on NTFS
+else build_binaries; fi                 # built here or this commit's release build (PREBUILT, scripts/lib/build.sh)
 mkdir -p secrets
 [ -f secrets/update.key ] || { python3 scripts/otatool.py keygen secrets/update.key secrets/update.pub; echo "new update signing key: secrets/update.key (keep it, back it up)"; }
 printf 'ARGS="%s"\n' "$DEFAULT_ARGS" > $OUT/hassmic.conf
 t "mkdir -p /data/local/hassmic"; adb push $OUT/hassmic.conf /data/local/hassmic/hassmic.conf > /dev/null
 t "rm -rf /data/local/hassmic/ota; rm -f /data/local/hassmic/hassmic"      # boot.sh prefers those; the fresh install wins
-FILES="$OUT/hassmic $OUT/runas $(ls $OUT/pryon_test $OUT/*.ko $OUT/libhmui.so 2>/dev/null || true) $OUT/otatool secrets/update.pub $RELEASE_PUB $DDIR/device.conf
+FILES="$OUT/hassmic $OUT/runas $(ls $OUT/pryon_test $OUT/*.ko $OUT/libhmui.so 2>/dev/null || true) ${TOYBOX:+$OUT/toybox} $OUT/otatool secrets/update.pub $RELEASE_PUB $DDIR/device.conf
        scripts/system/boot.sh scripts/system/main.sh scripts/system/sysinstall.sh scripts/device/lockdown.sh scripts/device/alexa-off.sh scripts/device/alexa-on.sh scripts/device/artifact-install.sh scripts/device/wifi.sh scripts/device/wifictl.dex scripts/device/ringbar.dex scripts/device/screen.dex
        ${HOME_APK:+scripts/device/$HOME_APK}"
 t "rm -rf $STAGE; mkdir -p $STAGE"
 adb push $FILES $DDIR/hassmic.rc $STAGE/ > /dev/null
 t "chmod 755 $STAGE/otatool; sh $STAGE/sysinstall.sh install $STAGE && touch $STAGE/ok"
 on_echo $STAGE/ok || { t "rm -rf $STAGE"; die "system partition not written (see above); nothing to undo"; }
-t "rm -rf $STAGE; ls -lZ /system/hassmic /system/etc/init/hassmic.rc"
+t "rm -rf $STAGE; ls -lZ /system/hassmic ${BOOT_RC:-/system/etc/init/hassmic.rc}      # BOOT_RC: the rc is in the ramdisk"
 echo "install done on the running $DEVICE; rebooting"
 adb reboot
 # the RTC's fastboot flag may still be set from the flash (kaeru leaves it): then this reboot stops in fastboot too

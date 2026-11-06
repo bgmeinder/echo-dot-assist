@@ -9,11 +9,20 @@ What changed for people using the Echo, newest first. Details and measurements a
   been found (issue #112). Echos that were updated recently may become unusable; the full extent is currently unknown.
   Until the cause is known, the setup says so and asks before it unlocks; the default answer is not to. If fastboot
   turns out locked after the unlock, it points to the issue before anyone runs the unlock again.
+- **Echo Spot: Bluetooth.** hassmic now brings up the Spot's Bluetooth chip itself (it sits on a serial line and
+  needs its firmware loaded first), so the Spot is a Bluetooth proxy for Home Assistant like the Dots, and plays music
+  from a paired phone, aptX HD included. The Spot's Wi-Fi and Bluetooth share one antenna: put the Spot on a 5 GHz
+  network for Bluetooth music; on 2.4 GHz it skips.
+- **Echo Spot: a newer Wi-Fi driver.** The Spot now runs Broadcom's 2025 Wi-Fi driver instead of Amazon's from 2017,
+  which kept Wi-Fi power saving off for good. Installed with hassmic; uninstalling puts Amazon's back.
 - **Bluetooth music on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry every few
   seconds where the phone's packets arrive unevenly.
 - **Echo Spot: a clock on the screen.** "Clock on the screen" (settings page, Lights: off, 24h or 12h) shows the time
   large in the middle of the Spot's round screen and the date under it, white on black, the light ring round the rim
   over them; the screen stays on while the clock shows. The time and its zone are Home Assistant's.
+- **Echo Spot: its own wake sound, and Drop In by voice.** The Spot now plays the tone Alexa played on it when it
+  starts listening, instead of hassmic's built-in one, and the Drop In voice blueprint knows the Spot as an Echo it
+  can call.
 - **Echo Spot: what plays, on the screen.** While Music Assistant plays on the Spot, its round screen shows the album
   or book cover, large, with the title and the artist under it; the clock comes back when it stops. Music Assistant
   tells it what plays and sends the cover over Sendspin, as it does for the Echo Shows' screen.
@@ -26,6 +35,10 @@ What changed for people using the Echo, newest first. Details and measurements a
   whisper model is not there (the Echo Spot and the Echo Show 5 cannot get it), the Echo tells a whisper by itself:
   whispered speech has no pitch. "Download from Amazon" no longer lists what Amazon refuses a model, and says so
   plainly when it refuses something, instead of asking for a new login.
+- **Echo Spot: "Download from Amazon" works.** The settings page's Amazon login and downloads (wake words, whisper and
+  sound detection models) now work on the Spot too: hassmic reaches the Spot's attestation key through Android's own
+  module loader, as Amazon's tool on it does. Whisper detection is the exception: Amazon does not hand its model to
+  the Spot (nor to the Echo Show 5), and the page now says so, where it used to ask for a new login.
 - **The certificates trusted, in one place.** hassmic now gathers the Echo's own certificate store and its Let's
   Encrypt roots into one file and checks HTTPS against that (on the Spot, the store's file names hid Amazon's root
   from its libcurl). Certificates of eMudhra are left out on every model.
@@ -40,6 +53,10 @@ What changed for people using the Echo, newest first. Details and measurements a
   as on a Dot. (`ringbar.dex` has a ring mode: a clear layer over the whole screen and a table that lays the band's
   strip around the rim, sent once.) The settings page draws and edits designs for the Spot the same way: round, the
   designer's second view is "Screen" there, and the frame thumbnails are rings.
+- **Echo Spot 1st gen: Home Assistant and sound.** The Spot is adopted by Home Assistant like the other models (wake
+  word, pipeline, replies), and its speaker plays: the media server Fire OS starts at boot never passed hassmic's audio on to the
+  speaker, so the satellite restarts it once at start (`devices/rook/README.md` has the measurements). Also fixed:
+  the Spot's clock no longer jumps to 1970 after a time sync from Home Assistant.
 
 ## 2026-11-04
 
@@ -161,6 +178,13 @@ What changed for people using the Echo, newest first. Details and measurements a
   model to the Echo Show 5, and the page called that a lost sign-in ("log in again"), which changes nothing. It now
   says Amazon does not hand it out to this model, and the whisper warning and the download list point at Copy models:
   bring it over from an Echo that has it. Should Amazon hand it out later, a download still works.
+- **Echo Spot 1st gen (2017), in progress.** Unlocked with amonet-rook, rooted and installed on one Spot: the wake
+  word, voice capture, the light band at the bottom of the round screen, the settings page and the firewall run from
+  boot as on the Echo Shows. Not tried with Home Assistant yet; Bluetooth stays off (a Broadcom controller on a UART,
+  not the Dots' and Shows' device). What the port needed is of use to other Fire OS 5 Echos: the build at Android 5.1
+  (API 22), a static toybox shipped with it (Fire OS 5's own toolbox lacks `tr`, `sed`, `head`, `tail`...), the init
+  services in the boot image's ramdisk, Magisk's own `magiskpolicy` for the SELinux patch, and a build container
+  (`tools/devenv/`) for a PC without the NDK. [devices/rook/README.md](devices/rook/README.md).
 
 ## 2026-11-01
 

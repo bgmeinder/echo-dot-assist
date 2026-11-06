@@ -35,4 +35,12 @@ if [ -f $OTA/current/main.sh ]; then
     fi
 fi
 export HASSMIC_DIR=$D HASSMIC_SYS=$SYS
+# A model whose toolbox lacks what the scripts use (rook: Fire OS 5 has no tr, sed, head, tail, pidof, pkill...) ships a
+# toybox with the build (device.conf TOYBOX): its applets first on PATH, as links root makes under /data at each boot,
+# so that an update's toybox is the one used (toybox goes by argv[0]).  Other models have no toybox here: nothing changes
+if [ -x $D/toybox ]; then
+    mkdir -p $BASE/bin; chown root:root $BASE/bin; chmod 755 $BASE/bin
+    for a in $($D/toybox); do ln -sf $D/toybox $BASE/bin/$a; done
+    export PATH=$BASE/bin:$PATH
+fi
 exec sh $D/main.sh "$@"

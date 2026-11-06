@@ -84,6 +84,11 @@ struct board {
     /* other amplifiers the same model is built with (the Echo Show 5 2nd gen: three, by board revision), each with its
      * own control: tried in order where speaker_gain is not on the card.  Fields as above; {NULL}-terminated, or NULL */
     const struct board_gain { const char *name; int stock, steps, db, min_db, limit; } *speaker_gain_alt;
+    /* a switch of card 0 that mutes the speaker amplifier (an enum or bool whose first item, 0, is off), set off at
+     * start and again whenever it comes back on (spkgain.c): the Echo Spot's "MFP Gpio Mute", the codec's MFP GPIO
+     * line to the amplifier, on from boot and switched off by stock's boot sound tool alone (bootsound/tinyctlplay),
+     * which a satellite does not run.  NULL: none */
+    const char *speaker_unmute;
 };
 
 extern const struct board board;

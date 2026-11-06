@@ -25,6 +25,13 @@
 # the new file, never half of one), boot.sh last, and the partition goes back to read-only whatever happens.
 umask 022
 MODE=$1 SRC=$2
+# run from install-system.sh over adb before boot.sh ever set a PATH: a model's toybox (device.conf TOYBOX, rook)
+# comes along in SRC, and this script's cut, stat, du... are its
+if [ -f "$SRC/toybox" ]; then                   # adb push from Windows leaves no x bit: chmod first
+    chmod 755 "$SRC/toybox"; mkdir -p "$SRC/bin"
+    for a in $("$SRC/toybox"); do ln -sf "$SRC/toybox" "$SRC/bin/$a"; done
+    export PATH="$SRC/bin:$PATH"
+fi
 H=/system/hassmic
 RC=/system/etc/init/hassmic.rc
 LR=/system/etc/led-resources
@@ -33,7 +40,7 @@ SYSLABEL=u:object_r:system_file:s0
 say() { echo "sysinstall $MODE: $*"; }
 case "$MODE" in install|factory|uninstall|leds) ;; *) say "usage: sysinstall.sh install|factory|uninstall|leds SRC [DIR]"; exit 2;; esac
 [ -x "$SRC/otatool" ] || { say "no $SRC/otatool"; exit 1; }
-[ "$(id -u)" = 0 ] || { say "needs root"; exit 1; }
+case "$(id -u)" in 0|uid=0\(*) ;; *) say "needs root"; exit 1;; esac     # Fire OS 5's toolbox id ignores -u (rook)
 
 if [ "$MODE" = leds ]; then
     L=$3
@@ -184,7 +191,9 @@ for f in "$SRC"/*; do
     esac
     new $H/$n "$f" $m 0:2000 $SYSLABEL
 done
-new $RC "$SRC/hassmic.rc" 644 0:0 $SYSLABEL
+# the init rc: in /system/etc/init, or (BOOT_RC, rook: Android 5.1's init reads no such folder) in the boot ramdisk
+# already, put there by scripts/mkbootroot.py; nothing to write here then
+[ "$(conf_get BOOT_RC)" = 1 ] || new $RC "$SRC/hassmic.rc" 644 0:0 $SYSLABEL
 home=$(. "$SRC/device.conf" 2>/dev/null && echo "$HOME_APK")
 if [ -n "$home" ] && [ -s "$SRC/$home" ]; then
     mkdir -p $HOMEDIR; chown 0:0 $HOMEDIR; chmod 755 $HOMEDIR; chcon $SYSLABEL $HOMEDIR

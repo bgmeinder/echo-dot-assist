@@ -2,6 +2,8 @@
 # Start the satellite in the foreground.  Extra arguments go to hassmic (e.g. -P wyoming, -w remote, -E, -V).
 D=/data/local/hassmic
 . $D/device.conf || exit 1
+# a model whose toolbox lacks what the scripts use ships a toybox (device.conf TOYBOX, rook): its applets first on PATH
+if [ -x $D/toybox ]; then mkdir -p $D/bin; for a in $($D/toybox); do ln -sf $D/toybox $D/bin/$a; done; export PATH=$D/bin:$PATH; fi
 sh $D/alexa-off.sh >/dev/null
 mkdir -p $D/state && chown $DAEMON_USER $D/state    # settings changed from Home Assistant (runs as DAEMON_USER)
 [ -n "$UX_SERVICE" ] && stop $UX_SERVICE

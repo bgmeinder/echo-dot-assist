@@ -526,6 +526,8 @@ and the action button pauses and resumes.
   <phone>": Home Assistant speaks those words, and only once "Allow the device to perform Home Assistant actions" is
   ticked in the Echo's ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure). Without it
   you hear the chime only. "Bluetooth announcements" on the settings page turns both off and picks their language.
+  On the Echo Spot, Wi-Fi and Bluetooth share one antenna: put it on a 5 GHz network, or a phone's music skips while
+  Wi-Fi is busy on 2.4 GHz.
 
 ### Separate volumes
 

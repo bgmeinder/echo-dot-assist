@@ -1,0 +1,26 @@
+# Applied with magiskpolicy to the sepolicy in the firmware's own boot.img ramdisk (scripts/install-boot.sh,
+# INSTALL=boot): rook has no /sepolicy on its system partition, and Android 5.1's policy (version 26) has no "map"
+# permission, which magiskpolicy says and leaves out of the file and fifo_file rules.  Not donut's magiskpolicy32 (the
+# Spot's linker wants DT_HASH, its TWRP is 64-bit): Magisk's arm64 magiskpolicy under qemu-aarch64 with TWRP's own
+# bionic (tools/twrp_bionic.py, device.conf SEPOLICY_RUNTIME).  Stock already has su as a permissive domain, but
+# nothing may enter it.  Root adb (the rules of donut's boot-root): with ro.secure=0 adbd switches itself to its
+# --root_seclabel u:r:su:s0 (init.usb.rc) and dies when that is refused.
+permissive adbd
+allow adbd adbd process setcurrent
+allow adbd su process { transition dyntransition }
+allow su su process setcurrent
+allow domain su binder { call transfer }
+allow domain su fd use
+allow domain su process sigchld
+allow domain su fifo_file { read write getattr ioctl append lock map open }
+allow domain su file { read write getattr ioctl append lock map open }
+allow domain su unix_stream_socket { connectto read write getattr ioctl shutdown }
+# hassmic's services (hassmic.rc in the ramdisk: seclabel u:r:su:s0), as on donut
+allow init su process { transition siginh rlimitinh noatsecure }
+allow su shell_exec file { read getattr map execute entrypoint open }
+allow su system_file file { read getattr map execute entrypoint open }
+# root's main.sh sets hassmic.clock.synced (clock_set) and hassmic.* has no context of its own: default_prop.  su is
+# permissive, so the set went through, logged as a denial at every sync (2026-11-05)
+allow su default_prop property_service set
+allow su property_socket sock_file write
+allow su init unix_stream_socket connectto

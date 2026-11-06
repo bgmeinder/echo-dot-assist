@@ -41,6 +41,13 @@ endif
 DEFS    := -DVERSION='"$(VERSION)"' -DBUILD='"$(BUILD)"' -DBUILD_TIME='"$(BUILD_TIME)"' -DREPO='"$(UPDATE_REPO)"' $(if $(RELEASE),-DRELEASE)
 CFLAGS  := -O2 -Wall -Wextra -fPIE -Isrc/include $(DEFS)
 LDFLAGS := -pie -fuse-ld=lld -Wl,--allow-shlib-undefined -Wl,--unresolved-symbols=ignore-in-shared-libs
+# bionic below API 24 (rook: Android 5.1, API 22) lacks getifaddrs and open_memstream: src/hassmic/compat22.c stands in,
+# its header declares them where the NDK's do not (the API level is the number at the end of TARGET)
+API     := $(lastword $(subst androideabi, ,$(TARGET)))
+ifeq ($(shell test $(API) -lt 24 && echo old),old)
+COMPAT  := src/hassmic/compat22.c
+CFLAGS  += -include src/hassmic/compat22.h
+endif
 STOCK_LIBS = $(addprefix $(STOCK)/,$(filter $(LIBS),$(1)))
 
 # The build id is compiled in; make must notice when it changes (a new commit), not only when sources change.
@@ -55,7 +62,13 @@ FORCE:
 BIN := $(OUT)/hassmic $(OUT)/runas $(OUT)/otatool $(if $(filter %screen.c,$(SCREEN)),$(OUT)/libhmui.so) \
        $(if $(filter libmixerAPI.so,$(LIBS)),$(OUT)/mixcap $(OUT)/mixplay $(OUT)/latency) \
        $(if $(filter -lOpenSLES,$(SYSLIBS)),$(OUT)/slplay) \
-       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test)
+       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test) \
+       $(if $(TOYBOX),$(OUT)/toybox)
+
+# A static toybox for a model whose own toolbox lacks what the device scripts use (device.mk TOYBOX := 1: rook, Fire OS 5);
+# tools/mktoybox.sh fetches the pinned source into toolchain/ once and builds it with the NDK
+$(OUT)/toybox: tools/mktoybox.sh
+	NDK=$(NDK) tools/mktoybox.sh $@
 
 .DEFAULT_GOAL := all
 all: $(BIN)
@@ -237,7 +250,7 @@ build/web_assets.c: tools/embed.py $(foreach w,$(WEB),$(firstword $(subst :, ,$(
 
 # SYSLIBS (device.mk): NDK system libraries a backend needs beside the stock ones (-lOpenSLES on checkers): they come
 # with the NDK, so no stubs are needed for them.
-$(OUT)/hassmic: $(HASSMIC) $(BOARD) $(AUDIO) $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(addprefix $(STOCK)/,$(LIBS))
+$(OUT)/hassmic: $(HASSMIC) $(BOARD) $(COMPAT) $(AUDIO) $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(addprefix $(STOCK)/,$(LIBS))
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -Isrc/hassmic $(filter %.c,$^) -o $@ $(LDFLAGS) -lm -ldl $(SYSLIBS) $(addprefix $(STOCK)/,$(LIBS))
 
@@ -252,7 +265,7 @@ build/hassmic-host-screen: $(filter-out $(RING) $(SCREEN),$(HASSMIC)) src/hassmi
 	cc -O2 -Wall -Wextra $(DEFS) -Isrc/include -Isrc/hassmic $(filter %.c,$^) -o $@ -lpthread -lm -ldl -lopus -lz
 
 # ARM build with file audio but the device's wake word engine, for running under qemu-arm (tools/qrun.sh).
-$(OUT)/hassmic-qemu: $(HASSMIC) $(BOARD) src/hassmic/audio_file.c $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
+$(OUT)/hassmic-qemu: $(HASSMIC) $(BOARD) $(COMPAT) src/hassmic/audio_file.c $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -Isrc/hassmic $(filter %.c,$^) -o $@ $(LDFLAGS) -lm -ldl $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
 

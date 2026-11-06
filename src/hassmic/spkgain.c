@@ -62,6 +62,8 @@ static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static int present = -1, fd = -1, wanted, written = -1, started, hi, count, stock, steps, per, lodb;
 static unsigned numid;
 static const char *ctl_name;           /* the control found: board.speaker_gain or one of speaker_gain_alt */
+static unsigned mute_id, mute_count, mute_enum;   /* board.speaker_unmute's control, if the card has it */
+static int spkgain_present_quiet(void);           /* probed (once), mute_id valid after: below */
 /* HASSMIC_FAKE_SPEAKER_GAIN=<file>[:<stock>:<steps>:<max>[:<per dB>[:<lowest dB, 0 or negative>]]]: a file standing in for the control (tests),
  * shaped as the Echo Dot 2's (6:1:35:1) unless told otherwise, whatever the board */
 static const char *fake;
@@ -84,6 +86,39 @@ static int ctl_write(int x)
     return ioctl(fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &v);
 }
 
+/* board.speaker_unmute (the Echo Spot's "MFP Gpio Mute"): off, whenever it is found on.  Said once */
+static void unmute(void)
+{
+    static int said;
+    struct snd_ctl_elem_value v;
+    if (!mute_id) return;
+    memset(&v, 0, sizeof v); v.id.numid = mute_id;
+    if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_READ, &v) < 0) return;
+    long was = mute_enum ? (long)v.value.enumerated.item[0] : v.value.integer.value[0];
+    if (!was) return;
+    for (unsigned i = 0; i < mute_count; i++) { if (mute_enum) v.value.enumerated.item[i] = 0; else v.value.integer.value[i] = 0; }
+    if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &v) < 0) { if (!said++) fprintf(stderr, "speaker: cannot switch \"%s\" off: %s\n", board.speaker_unmute, strerror(errno)); return; }
+    if (!said++) fprintf(stderr, "speaker: \"%s\" off (was %ld): the amplifier unmuted\n", board.speaker_unmute, was);
+}
+
+/* mu held: on, then off again, so the driver applies the line whatever it believes the state is */
+static void unmute_pulse(void)
+{
+    struct snd_ctl_elem_value v;
+    if (!mute_id) return;
+    memset(&v, 0, sizeof v); v.id.numid = mute_id;
+    for (unsigned i = 0; i < mute_count; i++) { if (mute_enum) v.value.enumerated.item[i] = 1; else v.value.integer.value[i] = 1; }
+    if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &v) < 0) return;
+    for (unsigned i = 0; i < mute_count; i++) { if (mute_enum) v.value.enumerated.item[i] = 0; else v.value.integer.value[i] = 0; }
+    ioctl(fd, SNDRV_CTL_IOCTL_ELEM_WRITE, &v);
+}
+
+void spkgain_unmute_pulse(void)
+{
+    if (!board.speaker_unmute || !spkgain_present_quiet()) return;
+    pthread_mutex_lock(&mu); unmute_pulse(); pthread_mutex_unlock(&mu);
+}
+
 static int probe(void)
 {
     struct snd_ctl_elem_list l; struct snd_ctl_elem_id *ids; struct snd_ctl_elem_info in;
@@ -96,16 +131,26 @@ static int probe(void)
         if (lodb > 0) lodb = 0;
         return steps > 0 && per > 0 && (hi - stock) * per >= steps;
     }
-    if (!board.speaker_gain) return 0;
+    if (!board.speaker_gain && !board.speaker_unmute) return 0;
     /* the board's control, then the other amplifiers it may have (board.speaker_gain_alt): the first one on the card */
-    struct board_gain g = { board.speaker_gain, board.speaker_gain_stock, board.speaker_gain_steps, board.speaker_gain_db,
-                            board.speaker_gain_min_db, board.speaker_gain_limit };
+    struct board_gain g = { board.speaker_gain ? board.speaker_gain : "", board.speaker_gain_stock, board.speaker_gain_steps,
+                            board.speaker_gain_db, board.speaker_gain_min_db, board.speaker_gain_limit };
     const struct board_gain *alt = board.speaker_gain_alt;
     if ((fd = open(CTL_DEV, O_RDWR | O_NONBLOCK | O_CLOEXEC)) < 0) { fprintf(stderr, "speaker gain: %s: %s\n", CTL_DEV, strerror(errno)); return 0; }
     memset(&l, 0, sizeof l);
     if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_LIST, &l) < 0 || !l.count || !(ids = calloc(l.count, sizeof *ids))) goto none;
     l.space = l.count; l.pids = ids;
     if (ioctl(fd, SNDRV_CTL_IOCTL_ELEM_LIST, &l)) l.used = 0;
+    if (board.speaker_unmute) {
+        for (unsigned i = 0; i < l.used && !mute_id; i++) if (!strcmp((const char *)ids[i].name, board.speaker_unmute)) mute_id = ids[i].numid;
+        memset(&in, 0, sizeof in); in.id.numid = mute_id;
+        if (mute_id && ioctl(fd, SNDRV_CTL_IOCTL_ELEM_INFO, &in) == 0 &&
+            (in.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED || in.type == SNDRV_CTL_ELEM_TYPE_BOOLEAN || in.type == SNDRV_CTL_ELEM_TYPE_INTEGER) && in.count >= 1 && in.count <= 2) {
+            mute_count = in.count; mute_enum = in.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+            unmute();
+        } else { fprintf(stderr, "speaker: no switch \"%s\" on card 0\n", board.speaker_unmute); mute_id = 0; }
+    }
+    if (!board.speaker_gain) { free(ids); return 0; }         /* the unmute alone: the fd stays for its watcher */
     for (;;) {
         for (unsigned i = 0; i < l.used && !numid; i++) if (!strcmp((const char *)ids[i].name, g.name)) numid = ids[i].numid;
         if (numid || !alt || !alt->name) break;
@@ -126,7 +171,7 @@ static int probe(void)
     return 1;
 none:
     fprintf(stderr, "speaker gain: no control \"%s\"%s on card 0\n", board.speaker_gain, board.speaker_gain_alt ? " (nor another of the board's)" : "");
-    close(fd); fd = -1;
+    if (!mute_id) { close(fd); fd = -1; }
     return 0;
 }
 
@@ -151,19 +196,29 @@ static void *watch(void *arg)
             struct pollfd p = { fd, POLLIN, 0 }; struct snd_ctl_event ev[8];
             if (poll(&p, 1, POLL_MS) > 0) while (read(fd, ev, sizeof ev) > 0) {}      /* which control: apply() reads ours */
         }
-        pthread_mutex_lock(&mu); apply(); pthread_mutex_unlock(&mu);
+        pthread_mutex_lock(&mu); if (present > 0) apply(); unmute(); pthread_mutex_unlock(&mu);
     }
     return NULL;
+}
+
+/* mu held: the watcher on the card's control events, once */
+static void start_watch(void)
+{
+    int one = 1; pthread_t t;
+    if (started) return;
+    if (!fake && ioctl(fd, SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS, &one) < 0) fprintf(stderr, "speaker gain: no control events (%s), polled\n", strerror(errno));
+    if (!pthread_create(&t, NULL, watch, NULL)) { pthread_detach(t); started = 1; }
 }
 
 int spkgain_present(void)
 {
     pthread_mutex_lock(&mu);
-    if (present < 0) present = probe();
+    if (present < 0) { present = probe(); if (mute_id) start_watch(); }     /* the unmute is watched whatever the gain */
     int r = present;
     pthread_mutex_unlock(&mu);
     return r;
 }
+static int spkgain_present_quiet(void) { spkgain_present(); return mute_id != 0; }
 
 /* whole dB below stock the page offers (0 or negative): board.speaker_gain_min_db, as far as the control goes */
 int spkgain_min(void)
@@ -195,10 +250,6 @@ void spkgain_set(int db)
     pthread_mutex_lock(&mu);
     wanted = db < lodb ? lodb : db > top ? top : db;
     if (wanted || started) apply();
-    if (wanted && !started) {
-        int one = 1; pthread_t t;
-        if (!fake && ioctl(fd, SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS, &one) < 0) fprintf(stderr, "speaker gain: no control events (%s), polled\n", strerror(errno));
-        if (!pthread_create(&t, NULL, watch, NULL)) { pthread_detach(t); started = 1; }
-    }
+    if (wanted) start_watch();
     pthread_mutex_unlock(&mu);
 }

@@ -2499,6 +2499,13 @@ Run in this order. Each step says what it proves.
       WIFI_DRIVER), stock's as .pre-hassmic.  make kernel-tools fetches tree, compiler and driver by commit
       (kernel-tools.sh: a .git URL is a repository and a commit); two builds byte-identical.  Cold boot: loaded at
       16 s, the Spot's MAC, PM 2 kept by the driver.
+- [x] Echo Spot: phone audio needs the Wi-Fi on 5 GHz (2026-11-06). With the clock fix and our Wi-Fi driver (above) the
+      audio came whole (receive counters: nothing dropped in ble.c's H4 framing or the L2CAP reassembly) but short:
+      44.2-48.8k frames/s of 48k in 10 s windows, the phone not getting it across beside Wi-Fi (both sides EDR 2/3
+      Mbit/s and 5-slot; Broadcom's Set_ACL_Priority 0xFC57 high while streaming, as bluedroid does, taken, little
+      change; no Wi-Fi scans then; CPU hotplug off, no change; btc_mode 1-5 all ~44-50 KB/s). With the Spot's Wi-Fi on 5
+      GHz (channel 100): 47923-48038 frames/s, gaps <= 42 ms, 0 dry-outs a minute for aptX and for aptX HD (576 kbit/s;
+      Fire OS's output is pcm16, so HD's 24 bits end there).
 - [x] Now playing on the Spot's screen (2026-11-05/06).  Upstream's metadata@v1 and artwork@v1 (sendspin.c, for the
       Echo Shows' screen.c) feed the round screen as well: shows_music() = screen_present() || ring_shows_music() asks
       for the roles, show_meta/show_progress/show_art/show_gone hand what plays to screen.h and to ring_band.c's
@@ -2507,6 +2514,14 @@ Run in this order. Each step says what it proves.
       drawn as a square of b px at top a, centred, through a FILTER_BITMAP paint); layout 288 px from the top at 29,
       title (24 chars) and artist (26) under it; in place of the clock while playing, the clock back when it stops;
       userActivity each minute meanwhile.  Seen on the Spot with an audiobook cover.
+- [x] The Spot's wake sound (2026-11-05).  SpeechInteractionManager's resources are shrunk; its resources.arsc names
+      system_state_active_start = res/BX.wav (48 kHz mono, 0.65 s, stored), the listening tone, and
+      system_state_user_speech_confirmed = res/AJ.wav; ban_ui_wakesound/ban_ui_endpointing are 0-byte placeholders.
+      board.c maps ui_wakesound and ui_wakesound_touch to BX.wav.  The Drop In blueprint's model list has echo-spot.
+      Full run, 2026-11-05: every model builds with STUBS=1, make unit passes, tests/run.py 34 of 35 (the build
+      image now has nodejs, iproute2, netcat); esphome's "wake word sent ahead of the live stream" (24000 bytes)
+      gives 22400 in this container 5 of 6 times on HEAD too: timing on the build host, not today's changes.  update needs a
+      git version (BUILD from git describe): passes with VERSION/BUILD given.
 - [x] Frozen at the first wake word after 18.6 h (2026-10-13, GitHub issue #31; Echo Dot 3 on 2026.10.12.210015, up
       ~24 h): wake word, wake sound, listening ring, then nothing; buttons dead (action logged, not acted on), no
       pipeline timeout, power cycle needed. HA ran a whole pipeline meanwhile. The log's last hassmic lines: `whisper:
@@ -3017,6 +3032,64 @@ Run in this order. Each step says what it proves.
       the rest of this round (the drawer over an app, the screenshot's orientation, a fling with a real finger, image decoding
       off the UI thread, goToSleep/wakeUp, a real MA token).
       Open items, one list: docs/re-checkers.md "What a port needs".
+- [~] Echo Spot 1st gen (`rook`, 2026-11-04). crown's SoC (MT8163) on Fire OS 5.5.6.9 (690918120, LVY48F): Android 5.1.1
+      (API 22), kernel 3.18.19, Broadcom CYW43569 (Wi-Fi bcmdhd, Bluetooth on a UART: off), 4 mics, round 480 x 480 screen,
+      the front end in the audio HAL (OpenSL ES), `libpryon.so` 2.41 with the old decoder API (every symbol hassmic needs).
+      Unlocked with amonet-rook-v2.0.0 (fastbrick.bat from Windows), rooted.  Found: the XDA boot-root leaves adb off on
+      this firmware (stock `init.fosflags.sh` + `adb_cd.sh` strip adb from `persist.sys.usb.config` on a release-keys
+      build; `ro.build.tags=test-keys` in default.prop cures it, `mkbootroot.py --prop`); Android 5.1's init reads no
+      `/system/etc/init/` (`hassmic.rc` into the ramdisk: `--add`, `--import`); bionic 22 lacks getifaddrs and
+      open_memstream (`src/hassmic/compat22.c`); Fire OS 5's toolbox lacks tr, sed, head, tail, pidof, pkill, timeout...
+      (a static toybox, `tools/mktoybox.sh`, first on the scripts' PATH); `settings` has no screen rows (Amazon's own
+      store); `service call` has no i64; no `libacehal_dha.so`; donut's magiskpolicy32 runs nowhere (the 5.1 linker wants
+      DT_HASH, TWRP is 64-bit): Magisk v31.1's arm64 magiskpolicy under qemu-aarch64 with TWRP's bionic
+      (`tools/twrp_bionic.py`, device.conf `SEPOLICY_RUNTIME`); the stock update zip flashes lk/tz/preloader (never whole
+      in TWRP).  Buttons: volume on `keys`, mute = KEY_POWER on `mtk-kpd`, flipping the keypad driver's `privacy_state`
+      (read once a second).  Installed on one Spot (boot image from the stock boot.img; `install-boot.sh --files-only`
+      from Git Bash): the satellite from init, home app in front, firewall rule by rule (no iptables-restore).
+      Built in a container on a remote Docker engine (`tools/devenv/`): the NDK, qemu, uv; sources in as a tar.
+      2026-11-05: adopted by Home Assistant (by IP), wake word, pipeline, reply; HTTPS media checked against the
+      firmware's store plus hassmic's cacerts.pem (the "Media over HTTPS" entry says what was wrong: libcurl's built-in
+      CA path, not a missing root).  The speaker, silent for a day with every stage of the path confirmed in
+      registers (codec, MFP, amp GPIO 122, mixer, DL1 running): the media server init starts at boot never carries
+      hassmic's playback to the primary output (dumpsys media.audio_flinger during an announcement: standby, 0 tracks,
+      0 writes), one started afresh does, the mic with it.  main.sh kills it at satellite start before hassmic starts
+      (device.conf MEDIA_RESTART): heard from a cold boot on the firmware's own kernel.  Why the boot-time one is so is
+      not known (the only state that differs is what Amazon's speech service attaches to the output at boot).  Traps on
+      the way: mediaserver holds /dev/snd/pcmC0D23p once anything played through it, so a later `tinyplay` blocks in
+      snd_pcm_open and passes for silence; the codec driver's aic32x4_apply_mute at every stream start re-applies the
+      MFP mute state (hassmic's unmute pulse at open lands 25 ms before the start, in time); HA's volume for a new Echo
+      is 20 %; a kernel comparison made with the boot-time media server compares nothing (R0rt1z2's XDA kernel was
+      blamed for an afternoon: same source g004652e, his build of 2025-11-24 against Amazon's of 2026-10-21; a
+      `mkbootroot.py --kernel` was added and removed again).  At 100 % the codec is at stock's own speaker settings
+      (audio_device.xml); the amplifier's Ext_Amp_Gain (6 of 6..24 dB) is the headroom above stock.  A boot of the XDA
+      image writes persist.sys.usb.config without adb into /data/property/, which outlives it (fixed from TWRP).  The
+      clock landed on 1970: Fire OS 5's toolbox `date` reads `@<epoch>` as 0 and clock_set checked one way only
+      (toybox's `date` first on PATH, the check both ways now).  The screen: it is on all along (the wake
+      call with i64 fails on 5.1's service tool, two i32 now), but a band along the bottom of a round screen is a
+      sliver under the bezel: ringbar.dex's ring mode (argv "ring", board.screen_round) draws a clear layer over the
+      whole screen and lays the band's strip around the rim by a table hassmic sends once (ring_band.c send_table:
+      the annulus of light_band px, the strip 2 pi (R - rows/2) long, its middle at the bottom); verified by
+      screenshot (a rainbow ring, 2026-11-05).  ART's verifier wants a check-cast on a Method taken out of an
+      Object[] (the PC's dexrun does not).  The page (web/ring.js): `round` in the ring status (ringdesign.c, from
+      board.screen_round); the clock (setting screen_clock, 2026-11-05): the renderer's ring mode takes messages
+      (5 ints: kind, a, b, c, n, then n bytes): a strip frame, the text cleared, or text drawn centred at baseline a,
+      size b, colour c into a Bitmap by the framework's Canvas and Paint (reflection; Roboto), the layer then that
+      bitmap's pixels with the last strip laid on again; ring_band.c clock_tick sends the time (h*0.30 px, 12 h
+      h*0.21: "12:45 PM" is the widest) and date (h*0.075) once a minute, on a fresh renderer and on a mode change,
+      a userActivity each minute meanwhile (5.1's settings tool writes no screen_off_timeout: Amazon's rows are
+      elsewhere); the layer wiped before every draw (Canvas.drawColor(0, CLEAR): SurfaceFlinger hands the buffers
+      round and a layer with alpha blends over the frame of two or three draws ago, two minute digits at once);
+      ART's verifier again: a Method out of an Object[] needs its check-cast.  main.sh's media server restart waits
+      for media.audio_flinger to be registered: hassmic started 0.2 s after the new pid crashed in a binder thread.
+      The SELinux rule for the clock-sync property (su -> default_prop property_service set, property_socket, init's
+      socket) is in sepolicy.rules; roundMap (the same mapping as send_table, held to it pixel for pixel by band_map_test.py,
+      which now also builds send_table's table), roundImage for tiles and the designer's stage, roundCellAt for
+      painting, conic thumbnails; the designer's switch reads "Screen" on a round Echo.  The build image has nodejs
+      now (band_map_test, the other page tests, in the container).
+      (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
+      does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
+      HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.
 - [~] Echo Show 8 1st gen (`crown`, 2026-10-13; `docs/re-crown.md`). Same platform as checkers: MT8163, Android 7.1.2,
       kernel 4.9.77, RT5616, gating latch, MT7668; Fire OS 6.5.7.0 NS6570 (6074). `libpryon.so` 2.41 (newer than the
       Show 5's; `pryon_test` loads the ALEXA model), `libasp.so` differs, `libopus`/`libz` as donut's. `devices/crown/`

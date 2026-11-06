@@ -35,7 +35,9 @@ T_REF, T_STRING, T_INT, T_BOOL = 0x01, 0x03, 0x10, 0x12
 
 # (tag, [(attr name or None for no namespace, type, value)], children)
 MANIFEST = ("manifest", [(None, "package", T_STRING, PACKAGE), ("versionCode", None, T_INT, 1), ("versionName", None, T_STRING, "1")], [
-    ("uses-sdk", [("minSdkVersion", None, T_INT, 24), ("targetSdkVersion", None, T_INT, 25)], []),
+    # minSdkVersion 22: Android 5.1 (rook) refuses an APK that asks for more ("Requires newer sdk version #24"); the
+    # activity needs nothing of any version
+    ("uses-sdk", [("minSdkVersion", None, T_INT, 22), ("targetSdkVersion", None, T_INT, 25)], []),
     ("application", [("label", None, T_STRING, "hassmic"), ("hasCode", None, T_BOOL, False), ("directBootAware", None, T_BOOL, True)], [
         ("activity", [("theme", None, T_REF, THEME_BLACK_FULLSCREEN), ("name", None, T_STRING, "android.app.Activity"),
                       ("stateNotNeeded", None, T_BOOL, True), ("excludeFromRecents", None, T_BOOL, True),

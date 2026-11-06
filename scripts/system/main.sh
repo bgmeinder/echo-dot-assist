@@ -134,7 +134,10 @@ clock_set() {
     ds=$(( ${up%.*} - ${at%.*} ))                   # whole seconds since hassmic had the time
     if [ ${#at} -gt 12 ] || [ $ds -lt 0 ] || [ $ds -gt 600 ]; then echo "clock: Home Assistant's time is stale, ignored"; return; fi
     now=$(( t + (ds * 100 + 1${up#*.} - 1${at#*.} + 50) / 100 )) was=$(date +%s)     # 1xx: centiseconds without octal
-    if ! date -u @$now > /dev/null 2>&1 || [ $(( $(date +%s) - now )) -gt 2 ]; then echo "clock: could not be set"; return; fi
+    # the check goes both ways: Fire OS 5's toolbox date reads "@<epoch>" as 0 and sets 1970 (rook, 2026-11-05;
+    # toybox's date is first on PATH there, once its links exist)
+    date -u @$now > /dev/null 2>&1; d=$(( $(date +%s) - now ))
+    if [ $d -gt 2 ] || [ $d -lt -2 ]; then echo "clock: could not be set (date landed $d s off)"; return; fi
     hwclock -w -u 2>/dev/null
     first=; [ "$(getprop hassmic.clock.synced)" = 1 ] || first=1
     setprop hassmic.clock.synced 1
@@ -680,6 +683,19 @@ satellite)
         # Android models: with the screen off Android lets the SoC suspend once no wake lock is held (autosleep), and the
         # satellite must keep listening: a kernel wake lock of root's, for as long as the satellite runs
         [ -n "$WAKE_LOCK" ] && echo "$WAKE_LOCK" > /sys/power/wake_lock
+        # rook: the media server as it comes up at boot plays nothing of ours to the speaker (hassmic's track never
+        # reaches the primary output thread: 0 tracks, 0 writes in dumpsys media.audio_flinger, whatever the kernel, codec
+        # and amplifier say); one started afresh plays, and the mic keeps working (2026-11-05, by ear and dumpsys).  So
+        # it is restarted here, before hassmic is started below, so hassmic's audio session is made on the fresh one.
+        # kill, not ctl.restart: that one took a minute to act.
+        if [ -n "$MEDIA_RESTART" ]; then
+            for p in $(pidof mediaserver); do kill -9 $p; done
+            # the new one registers its services a moment after it has a pid; hassmic started against it before that
+            # crashed in its binder threads (2026-11-05), so wait for the audio flinger to be there
+            i=0; while [ $i -lt 30 ] && ! service check media.audio_flinger 2>/dev/null | grep -q found; do sleep 1; i=$((i + 1)); done
+            sleep 1
+            echo "media server restarted: pid $(pidof mediaserver), audio flinger up after $i s"
+        fi
     } 2>&1 | stamped >> $LOG
     # hassmic offers Wi-Fi motion where the module can be loaded (wifimotion.c), the loop below loads it when needed
     [ -n "$KMOD" ] && [ -f $D/$KMOD ] && export HASSMIC_WIFI_KMOD=/proc/${KMOD%.ko}

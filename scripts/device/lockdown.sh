@@ -246,7 +246,11 @@ load_each() {
     [ -n "$KSAPP" ] || kiosk_ports | while read -r r; do while $1 -w -D $r 2>/dev/null; do :; done; done
     $1 -w -P INPUT DROP
 }
-load() { load_once $1 2>/dev/null || load_once $1 || { echo "!! $1-restore failed twice: loading rule by rule"; load_each $1; }; }
+# Fire OS 5 (rook) has no iptables-restore at all: rule by rule from the start, without the noise
+load() {
+    command -v $1-restore > /dev/null || { load_each $1; return; }
+    load_once $1 2>/dev/null || load_once $1 || { echo "!! $1-restore failed twice: loading rule by rule"; load_each $1; }
+}
 apply() {
     DNS=$(resolvers); kiosk_state
     load iptables

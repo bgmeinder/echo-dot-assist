@@ -32,6 +32,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "spkgain.h"
 
 static SLObjectItf engine_obj, mix_obj;
 static SLEngineItf engine;
@@ -233,6 +234,10 @@ static struct pstream voice = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHRE
 #define TX_SET_STREAM_VOLUME_A9 "7"
 #define TX_GET_STREAM_MAX_VOLUME_A7 "10"
 #define TX_GET_STREAM_MAX_VOLUME_A9 "14"
+/* Android 5.1 (SDK 22, rook): probed on the Spot (2026-11-04): 4 set the music stream (dumpsys audio showed it), 13 is
+ * getStreamVolume, 15 returned the music stream's maximum (30) */
+#define TX_SET_STREAM_VOLUME_A5 "4"
+#define TX_GET_STREAM_MAX_VOLUME_A5 "15"
 #define STREAM_MUSIC "3"
 static pthread_mutex_t vol_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t vol_cond = PTHREAD_COND_INITIALIZER;
@@ -261,13 +266,16 @@ static int parcel_int(const char *out, int *v)
 /* the transaction numbers follow the Android release: Android 7.1 (SDK 25: checkers, crown) and 9 (SDK 28: athena) are the
  * ones verified; SDK 28 and newer take 9's, older ones 7's.  A wrong number is somebody else's method: a model on another
  * release checks them first (service call audio, as above) */
-static int a9;
+static int a9, a5;
 static void tx_init(void)
 {
     char sdk[PROP_VALUE_MAX] = "";
     __system_property_get("ro.build.version.sdk", sdk);
     a9 = atoi(sdk) >= 28;
+    a5 = atoi(sdk) < 23;                /* Android 5.1 (rook); 6 is assumed alike, untried */
 }
+#define TX_SET_STREAM_VOLUME (a9 ? TX_SET_STREAM_VOLUME_A9 : a5 ? TX_SET_STREAM_VOLUME_A5 : TX_SET_STREAM_VOLUME_A7)
+#define TX_GET_STREAM_MAX_VOLUME (a9 ? TX_GET_STREAM_MAX_VOLUME_A9 : a5 ? TX_GET_STREAM_MAX_VOLUME_A5 : TX_GET_STREAM_MAX_VOLUME_A7)
 
 static void *vol_thread(void *arg)
 {
@@ -286,12 +294,12 @@ static void *vol_thread(void *arg)
         if (v < 0) continue;
         char out[256], idx[12];
         if (max <= 0) {
-            char *get[] = { "/system/bin/service", "call", "audio", a9 ? TX_GET_STREAM_MAX_VOLUME_A9 : TX_GET_STREAM_MAX_VOLUME_A7, "i32", STREAM_MUSIC, NULL };
+            char *get[] = { "/system/bin/service", "call", "audio", TX_GET_STREAM_MAX_VOLUME, "i32", STREAM_MUSIC, NULL };
             core_run(get, out, sizeof out);
             if (parcel_int(out, &max) || max <= 0 || max > 100) { fprintf(stderr, "audio: no maximum for the music stream (%s)\n", out); max = 0; continue; }
         }
         snprintf(idx, sizeof idx, "%d", (v * max + 50) / 100);
-        char *set[] = { "/system/bin/service", "call", "audio", a9 ? TX_SET_STREAM_VOLUME_A9 : TX_SET_STREAM_VOLUME_A7, "i32", STREAM_MUSIC, "i32", idx,
+        char *set[] = { "/system/bin/service", "call", "audio", TX_SET_STREAM_VOLUME, "i32", STREAM_MUSIC, "i32", idx,
                         "i32", "0", "s16", "android", NULL };
         core_run(set, out, sizeof out);
         if (parcel_int(out, NULL)) fprintf(stderr, "audio: setting the music stream to %s of %d failed (%s)\n", idx, max, out);
@@ -455,6 +463,7 @@ static int s_open(struct pstream *s, unsigned rate, unsigned channels, SLint32 s
     if (!engine_ok() || !rate || channels < 1 || channels > 2) return -1;
     route_settle();
     if (s->obj) s_close(s, 0);
+    spkgain_unmute_pulse();             /* the Echo Spot's amplifier mute, back on by itself after a while idle (spkgain.h) */
     SLDataLocator_AndroidSimpleBufferQueue loc = { SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, PLAY_NBUF };
     SLDataFormat_PCM fmt = { SL_DATAFORMAT_PCM, channels, rate * 1000, SL_PCMSAMPLEFORMAT_FIXED_16, SL_PCMSAMPLEFORMAT_FIXED_16,
                              channels == 2 ? SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT : SL_SPEAKER_FRONT_CENTER,

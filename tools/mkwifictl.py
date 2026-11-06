@@ -12,7 +12,8 @@ Reflection only (Class.forName/getMethod/getField): the dex references java.* cl
 any Android 7 and ART's verifier has nothing to resolve but the platform.  The WifiService methods are the
 ones of the firmware's own framework dex (boot-framework.oat of 8149): addOrUpdateNetwork(WifiConfiguration)I,
 enableNetwork(IZ)Z, getConfiguredNetworks()List, getConnectionInfo()WifiInfo, getScanResults(String)List,
-reconnect()V, removeNetwork(I)Z, setWifiEnabled(String,Z)Z (Fire OS names the caller), startScan(ScanSettings,
+reconnect()V, removeNetwork(I)Z, setWifiEnabled(String,Z)Z (Fire OS names the caller; Android 5.1 and 6, the Echo
+Spot: setWifiEnabled(Z)Z, picked by ro.build.version.sdk at run time), startScan(ScanSettings,
 WorkSource)V.  Output is shaped like wpa_cli's, so scripts/device/wifi.sh can serve both worlds.  Verbs:
 
     status                          wpa_state=, id=, ssid=, ip_address=, freq=     (wpa_cli status)
@@ -172,7 +173,10 @@ The Java source it stands for:
         }
         static void reassociate(Object w) { os(w, "reconnect"); p("OK"); }
         static void wifion(Object w) {
-            Object r = w2(w, "setWifiEnabled", "java.lang.String", "boolean", null, Boolean.TRUE);
+            String sdk = (String) sinv("android.os.SystemProperties", "get", "java.lang.String", "ro.build.version.sdk");
+            Object r = sdk.equals("22") || sdk.equals("23")     // Android 5.1, 6 (rook): setWifiEnabled(boolean);
+                ? w1(w, "setWifiEnabled", "boolean", Boolean.TRUE)         // the caller's name only from 7
+                : w2(w, "setWifiEnabled", "java.lang.String", "boolean", pkg(), Boolean.TRUE);
             p(Boolean.TRUE.equals(r) ? "OK" : "FAIL");
         }
         static void name(String[] a) { p(hex2s(a[1])); }
@@ -833,8 +837,23 @@ def emit():
         m.append(("volmax", c))
 
     def wifion():
-        # w=0, w2's arguments 1..6 (as startscan)
+        # w=0, w2's arguments 1..6 (as startscan); sdk in 1 first
         c = Code(7, 1)
+        c.const_string(1, "android.os.SystemProperties"); c.const_string(2, "get")
+        c.const_string(3, "java.lang.String"); c.const_string(4, "ro.build.version.sdk")
+        c.invoke(STATIC, "sinv", [1, 2, 3, 4]); c.move_result(1, True)
+        c.check_cast(1, STR)
+        c.const_string(2, "22"); c.invoke(VIRT, "str.eq", [1, 2]); c.move_result(2)
+        c.ifz(IFEQZ, 2, "not22")
+        c.goto_("old")
+        c.label("not22")
+        c.const_string(2, "23"); c.invoke(VIRT, "str.eq", [1, 2]); c.move_result(2)
+        c.ifz(IFEQZ, 2, "new")
+        c.label("old")                                        # Android 5.1 and 6 (rook): setWifiEnabled(boolean)
+        c.const_string(2, "setWifiEnabled"); c.const_string(3, "boolean"); c.sget_obj(4, "bool.T")
+        c.invoke(STATIC, "w1", [0, 2, 3, 4]); c.move_result(1, True)
+        c.goto_("ok")
+        c.label("new")                                        # Android 7 and 9: the caller's name in front
         c.move(1, 0, True)
         c.const_string(2, "setWifiEnabled")
         c.const_string(3, "java.lang.String")
@@ -842,6 +861,7 @@ def emit():
         c.invoke(STATIC, "pkg", []); c.move_result(5, True)
         c.sget_obj(6, "bool.T")
         c.invoke_range(STATIC_RANGE, "w2", 1, 6); c.move_result(1, True)
+        c.label("ok")
         okfail(c, 1, 2)
         m.append(("wifion", c))
 
@@ -877,6 +897,8 @@ REFLECTED = [
     ("Landroid/net/wifi/IWifiManager;", "removeNetwork", ["I", "Ljava/lang/String;"], False),
     ("Landroid/net/wifi/IWifiManager;", "reconnect", ["Ljava/lang/String;"], False),
     ("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", ["Ljava/lang/String;", "Z"], False),
+    # Android 5.1 and 6 (rook, API 22): no caller's name yet
+    ("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", ["Z"], False),
     ("Landroid/media/IAudioService$Stub;", "asInterface", ["Landroid/os/IBinder;"], True),
     ("Landroid/media/IAudioService;", "getStreamMaxVolume", ["I"], False),
     ("Landroid/media/IAudioService;", "setStreamVolume", ["I", "I", "I", "Ljava/lang/String;"], False),
@@ -913,6 +935,11 @@ for _m, _p in (("getConnectionInfo", (STR9,)), ("startScan", (STR9,)),
                ("addOrUpdateNetwork", ("Landroid/net/wifi/WifiConfiguration;", STR9)), ("enableNetwork", ("I", "Z", STR9)),
                ("removeNetwork", ("I", STR9)), ("reconnect", (STR9,))):
     ONLY_IF[("Landroid/net/wifi/IWifiManager;", _m, _p)] = API9
+# setWifiEnabled took the caller's name with Android 7: java.util.stream is on the boot class path from there (API 24;
+# android.icu would not do, Fire OS 5 carries it already)
+API7 = "Ljava/util/stream/Stream;"
+ONLY_IF[("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", ("Z",))] = "!" + API7
+ONLY_IF[("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", (STR9, "Z"))] = API7
 
 PROG = Program(ME, SELF, reflected=REFLECTED, reflected_fields=REFLECTED_FIELDS, constants=CONSTANTS, only_if=ONLY_IF)
 

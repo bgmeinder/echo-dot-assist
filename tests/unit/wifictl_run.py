@@ -138,6 +138,11 @@ class Audio:
         self.calls.append((k, i, flags, pkg)); self.vol[k] = min(i, self.max[k])
 
 
+class Wifi5(Wifi):
+    """Android 5.1 (API 22, the Echo Spot): the Android 7 calls, but setWifiEnabled without the caller's name"""
+    def setWifiEnabled(self, on): self.enabled = on; self.calls.append(("wifi", on)); return True
+
+
 class JavaEnv(dexrun.JavaEnv):
     CLASSES = (Config, Info, Scan, Wifi, Slice, Audio)
     NAMES = ("android.os.ServiceManager", "android.os.SystemProperties", "android.net.wifi.IWifiManager$Stub", "android.media.IAudioService$Stub",
@@ -146,7 +151,7 @@ class JavaEnv(dexrun.JavaEnv):
     def __init__(self, wifi, audio=None):
         super().__init__(mk.PROG)
         self.wifi, self.audio = wifi, audio or Audio()
-        self.sdk = "28" if isinstance(wifi, Wifi9) else "24"
+        self.sdk = "28" if isinstance(wifi, Wifi9) else "22" if isinstance(wifi, Wifi5) else "24"
 
     def static_call(self, cls, name, args):
         if cls == "android.os.ServiceManager":
@@ -182,6 +187,9 @@ def main():
     check(out == ["Kitchen ä"], "name: hex to text, UTF-8")
     out, _, _ = run(w, "wifi-on")
     check(out == ["OK"] and w.enabled and w.calls[-1] == ("wifi", None, True), "wifi-on: setWifiEnabled(null, true)")
+    w5 = Wifi5()
+    out, _, _ = run(w5, "wifi-on")
+    check(out == ["OK"] and w5.enabled and w5.calls[-1] == ("wifi", True), "api 22: wifi-on is setWifiEnabled(true), no caller's name")
     psk = "0123456789abcdefABCDEF0123456789abcdef0123456789abcdef0123456789"
     out, _, _ = run(w, "add", "486f6d65", psk)
     check(out == ["0"], "add: prints the new id")
