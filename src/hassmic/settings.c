@@ -2,6 +2,7 @@
 #include "board.h"
 #include "core.h"
 #include "a2dp.h"
+#include "board.h"
 #include "arb.h"
 #include "dropin.h"
 #include "https.h"
@@ -65,7 +66,7 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 
 /* ---------------------------------------------------------------- the table */
 
-enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, STOP_ENDS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WHISPER_REPLY, WAKE_EVENTS, REQUEST_TEXT, WIFI_MOTION, 
+enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, STOP_ENDS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WHISPER_REPLY, HEADPHONE_VOL, WAKE_EVENTS, REQUEST_TEXT, WIFI_MOTION, 
           WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT, 
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET, NSET };
@@ -125,6 +126,8 @@ static const struct setting table[NSET] = {
     [WHISPER]     = { "whisper_detection", "Whisper detection", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     /* main.c whisper_gain: the reply to a whispered request at this % of the reply volume, along the volume curve */
     [WHISPER_REPLY] = { "whispered_reply_volume", "Reply to a whisper", "Features", "%", S_INT, 10, 100, 1, 0 },
+    /* main.c jack_tick: the volume while headphones are in, as a share of the speaker's (board.jack_state) */
+    [HEADPHONE_VOL] = { "headphone_volume", "Headphone volume", "Sound", "%", S_INT, 10, 100, 1, 0 },
     /* proto_esphome.c's "Wake word" event entity (core_wake_events, issue #48) */
     [WAKE_EVENTS] = { "wake_events", "Wake word events", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     /* proto_esphome.c's "Last heard" and "Last reply" text sensors (issue #53) */
@@ -188,6 +191,7 @@ static int present(enum id i)
     case BT_ANNOUNCE: case BT_LANG: case BT_AUDIO: case BT_SPEAKER: case BT_OUT_DELAY: case BT_OUT_AWAKE: case BT_OUT_STAY: return ble_present();
     case WHISPER: return core_whisper_model();
     case WHISPER_REPLY: return core_whisper_model();
+    case HEADPHONE_VOL: return board.jack_state != NULL;
     case SOUND: return sound_model() != SOUND_NONE;               /* the firmware has one on every model so far */
     case LIGHT_SENSOR: return core_lux() == core_lux();          /* a light sensor: not NAN */
     case LED_AUTO: return core_led_has_auto();
@@ -298,6 +302,7 @@ int settings_get(const struct setting *s)
     case BT_OUT_STAY: return bt_stay;
     case WHISPER: return whisper;
     case WHISPER_REPLY: return core_whisper_reply(-1);
+    case HEADPHONE_VOL: return core_headphone_volume(-1);
     case LIGHT_SENSOR: return light_sensor;
     case WAKE_EVENTS: return wake_events;
     case REQUEST_TEXT: return request_text;
@@ -360,6 +365,7 @@ static void put(enum id i, int v)
         bt_speaker = v; a2dp_out_stay(bt_stay && v); if (!v && a2dp_out_enabled()) a2dp_out_enable(0); break;
     case WHISPER: whisper = v; core_whisper_enable(v); break;
     case WHISPER_REPLY: core_whisper_reply(v); break;
+    case HEADPHONE_VOL: core_headphone_volume(v); break;
     case LIGHT_SENSOR: light_sensor = v; break;
     case WAKE_EVENTS: wake_events = v; break;
     case REQUEST_TEXT: request_text = v; break;

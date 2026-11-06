@@ -25,6 +25,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <linux/netlink.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -2901,6 +2902,80 @@ static void on_volume(int dir)
     pthread_mutex_unlock(&core_lock);
 }
 
+/* Headphones (board.jack_state, rook's h2w switch): plugged in, the volume becomes headphone_pct % of the speaker's
+ * (75 %: with stock's own +2 steps of "HP Driver Gain Volume" on the jack, the speaker's volume was loud in headphones,
+ * 2026-11-05), and unplugged, the speaker's comes back, whatever was set meanwhile.  A real volume change, so Home
+ * Assistant, Music Assistant and the ring show it.  The speaker's volume is kept in state/volume.speaker while
+ * headphones are in: a restart in between still puts it back.  A start with headphones already in changes nothing.
+ * No polling: the jack is a kernel switch (switch class), which announces each change as a uevent (SWITCH_NAME=h2w,
+ * SWITCH_STATE=...), as Android's audio service hears it; jack_thread sleeps on a NETLINK_KOBJECT_UEVENT socket and
+ * reads the state file when a switch uevent comes.  Its input device (ACCDET) reports no switch events */
+static atomic_int headphone_pct = 75;
+int core_headphone_volume(int set) { if (set >= 10 && set <= 100) atomic_store(&headphone_pct, set); return atomic_load(&headphone_pct); }
+
+static const char *speaker_volume_path(void)
+{
+    static char p[256]; const char *d = getenv("HASSMIC_STATE");
+    snprintf(p, sizeof p, "%s/volume.speaker", d ? d : "/data/local/hassmic/state");
+    return p;
+}
+
+static int jack_was = -1;
+
+static void jack_check(void)
+{
+    int was = jack_was;
+    char c = '0'; int f = open(board.jack_state, O_RDONLY);
+    if (f < 0) return;
+    if (read(f, &c, 1) != 1) c = '0';
+    close(f);
+    int in = c != '0';
+    if (in == was) return;
+    int first = was < 0; jack_was = in;
+    FILE *sf;
+    if (first && in) return;                       /* already in at start: the volume as it was left */
+    pthread_mutex_lock(&core_lock);
+    if (in) {
+        int v = core_volume(), h = (v * atomic_load(&headphone_pct) + 50) / 100;
+        char t[16]; snprintf(t, sizeof t, "%d\n", v);
+        statefile_write(speaker_volume_path(), 0644, t, strlen(t));
+        if (h < 1 && v > 0) h = 1;
+        fprintf(stderr, "headphones in: volume %d -> %d (%d %%)\n", v, h, atomic_load(&headphone_pct));
+        core_set_volume(h);
+    } else if ((sf = fopen(speaker_volume_path(), "r"))) {
+        int v = -1;
+        if (fscanf(sf, "%d", &v) != 1) v = -1;
+        fclose(sf); unlink(speaker_volume_path());
+        if (v >= 0 && v <= 100) { fprintf(stderr, "headphones out: the speaker's volume %d back\n", v); core_set_volume(v); }
+    } else if (!first) fprintf(stderr, "headphones out\n");
+    pthread_mutex_unlock(&core_lock);
+}
+
+static void *jack_thread(void *arg)
+{
+    (void)arg;
+    int fd = socket(AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    struct sockaddr_nl a; memset(&a, 0, sizeof a);
+    a.nl_family = AF_NETLINK; a.nl_groups = 1;      /* the kernel's uevents */
+    if (fd < 0 || bind(fd, (struct sockaddr *)&a, sizeof a)) {
+        fprintf(stderr, "headphones: no uevent socket (%s), the jack goes unnoticed\n", strerror(errno));
+        if (fd >= 0) close(fd);
+        return NULL;
+    }
+    jack_check();                                   /* where it stands at start */
+    char buf[2048];
+    while (!atomic_load(&quit)) {
+        ssize_t n = recv(fd, buf, sizeof buf - 1, 0);
+        if (n <= 0) { if (n < 0 && errno == EINTR) continue; break; }
+        buf[n] = 0;
+        int sw = 0;                                 /* NUL-separated KEY=value lines: a switch's change? */
+        for (char *q = buf; q < buf + n; q += strlen(q) + 1) if (!strcmp(q, "SUBSYSTEM=switch")) sw = 1;
+        if (sw) jack_check();
+    }
+    close(fd);
+    return NULL;
+}
+
 static void *volume_led_thread(void *arg)
 {
     int tick = 0;
@@ -3234,6 +3309,7 @@ int main(int argc, char **argv)
     pthread_create(&play_t, NULL, playback_thread, NULL);
     pthread_create(&ear_t, NULL, earcon_thread, NULL);
     { pthread_t vol_t; pthread_create(&vol_t, NULL, volume_led_thread, NULL); pthread_detach(vol_t); }
+    if (board.jack_state) { pthread_t jt; if (!pthread_create(&jt, NULL, jack_thread, NULL)) pthread_detach(jt); }
 
     static const struct button_handler buttons = { on_action, on_mute, on_volume, on_pair, on_hold, button_event };
     if (buttons_start(input, &buttons) < 0) fprintf(stderr, "buttons: %s not available\n", input);

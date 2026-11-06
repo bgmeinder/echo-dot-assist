@@ -11,6 +11,10 @@ What changed for people using the Echo, newest first. Details and measurements a
   turns out locked after the unlock, it points to the issue before anyone runs the unlock again.
 - **Bluetooth music on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry every few
   seconds where the phone's packets arrive unevenly.
+- **Echo Spot: headphones at a gentler volume, and Music Assistant.** Plugging headphones into the Spot's 3.5 mm jack
+  turns the volume down to 75 % of what it was ("Headphone volume" on the settings page) and unplugging puts it back;
+  the Spot learns of the plug from the kernel, nothing polls. The Spot plays in Music Assistant once paired with its
+  Sendspin token, as the other Echos do.
 - **Quieter replies to whispers, on every model.** Whisper a request and the Echo plays its reply quieter ("Reply to a
   whisper" on the settings page, 25 % of the reply volume by default), whatever assistant answers. Where Amazon's
   whisper model is not there (the Echo Spot and the Echo Show 5 cannot get it), the Echo tells a whisper by itself:

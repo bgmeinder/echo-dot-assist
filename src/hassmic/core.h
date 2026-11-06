@@ -167,6 +167,8 @@ enum { TTS_REPLY, TTS_MEDIA, TTS_ANNOUNCE };
 void   core_tts_begin(unsigned rate, unsigned channels, int kind);
 /* the setting whispered_reply_volume: the reply to a whispered request at this % of the reply volume (10..100) */
 int    core_whisper_reply(int set);
+/* the setting headphone_volume: while headphones are in (board.jack_state), the volume is this % of the speaker's */
+int    core_headphone_volume(int set);
 void   core_tts_data(const void *pcm, size_t len);
 void   core_tts_end(void);                                  /* drains, then played() and core_pipeline_finish() */
 int    core_tts_flushing(void);                             /* barge-in: drop audio until core_tts_end() */

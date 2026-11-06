@@ -2455,6 +2455,11 @@ Run in this order. Each step says what it proves.
       304, a whispered one 710 (18 of 62 speech frames voiced); its reply "marginally quieter": with separate volumes
       off whisper_gain took the reply level from kinds[] (a stale 40) instead of the volume (90): -12 dB, not -20.
       Fixed (core_volume() unless vol_split); the log names the dB.  Default 25 %, by ear.
+- [x] Headphone volume (rook, 2026-11-05).  The jack is louder than the speaker at one volume (stock's XML raises
+      "HP Driver Gain Volume" 9 -> 11 on it).  board.jack_state (rook: /sys/class/switch/h2w/state); main.c jack_thread
+      on a NETLINK_KOBJECT_UEVENT socket (switch uevents, SUBSYSTEM=switch), no polling (ACCDET, the jack's input
+      device, has no EV_SW); plugged: volume = headphone_volume % (75) of the speaker's, kept in state/volume.speaker;
+      unplugged: back.  Setting headphone_volume (Sound), listed only with a jack_state.
 - [x] Bluetooth on a UART (rook, 2026-11-05).  The Spot's BCM43569 sits on /dev/ttyMT1 (bluetooth:radio 0660; the
       kernel has no Bluetooth stack), unpatched it answers nothing useful.  bt_uart.c (board bt_dev "uart:<tty>",
       bt_patch, bt_baud, bt_mac) does libbt-vendor's sequence: 115200 RTS/CTS, HCI_Reset, Update_Baudrate 0xFC18 to
