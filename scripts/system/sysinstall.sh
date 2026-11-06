@@ -148,6 +148,10 @@ if [ "$MODE" = uninstall ]; then
         staged=; new $LR/layer_config_common.json $LSTOCK 644 0:0 $SYSLABEL; commit; rm $LSTOCK
     fi
     rm -f $LR/hassmic_*.animation /system/etc/hassmic-leds.digest
+    wd=$(conf_get WIFI_DRIVER); wdst=${wd#*:}
+    if [ -n "$wd" ] && [ -f "$wdst.pre-hassmic" ]; then
+        staged=; new "$wdst" "$wdst.pre-hassmic" 644 0:0 $SYSLABEL; commit; rm "$wdst.pre-hassmic"; say "stock's Wi-Fi driver back"
+    fi
     rm -rf $H $RC $HOMEDIR; sync
     say "hassmic removed from the system partition"
     exit 0
@@ -185,6 +189,15 @@ home=$(. "$SRC/device.conf" 2>/dev/null && echo "$HOME_APK")
 if [ -n "$home" ] && [ -s "$SRC/$home" ]; then
     mkdir -p $HOMEDIR; chown 0:0 $HOMEDIR; chmod 755 $HOMEDIR; chcon $SYSLABEL $HOMEDIR
     new $HOMEDIR/HassmicHome.apk "$SRC/$home" 644 0:0 $SYSLABEL
+fi
+# A Wi-Fi driver of our own build where the system loads it from (device.conf WIFI_DRIVER "<file in the set>:<path>",
+# rook: Broadcom's 2025 bcmdhd for Amazon's, which refuses power save).  Stock's stays beside it as .pre-hassmic, staged
+# first so it is in place before ours; Wi-Fi loads the new one when next switched on (the next boot)
+wd=$(conf_get WIFI_DRIVER)
+if [ -n "$wd" ] && [ -s "$SRC/${wd%%:*}" ]; then
+    wdst=${wd#*:}
+    [ -f "$wdst.pre-hassmic" ] || [ ! -f "$wdst" ] || new "$wdst.pre-hassmic" "$wdst" 644 0:0 $SYSLABEL
+    new "$wdst" "$SRC/${wd%%:*}" 644 0:0 $SYSLABEL
 fi
 if [ "$MODE" = install ] && [ -f "$SRC/sepolicy" ]; then
     # The policy as boot-root left it stays beside it, for --uninstall; staged first, so commit() renames it into place

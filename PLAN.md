@@ -2479,6 +2479,26 @@ Run in this order. Each step says what it proves.
       a 10 s receive window only when something was dropped or over 3 % short.
       a2dp_codecs.c: board.a2dp_max_kbps leaves out codecs above it (aptX HD 576, aptX 384 kbit/s at 48 kHz: 352 at
       44.1 kHz offered alone under a cap between the two); board.a2dp_buffer_ms the jitter buffer (150 by default).
+- [x] A Wi-Fi driver of our own build (rook, 2026-11-06).  The Spot's phone audio skipped with Wi-Fi power save off.
+      Amazon's bcmdhd.ko (1.363.110.17) is built with LAB126_DISABLE_PS: the interface registered
+      PM_BLOCK, every power-save request refused (traced: wpa_supplicant's "enabled" after DHCP reached cfg80211, the
+      chip stayed at PM 0, and was written 0 again ~20 s after a connect).  At PM 0 the chip's Wi-Fi kept the antenna
+      it shares with Bluetooth: aptX at 20-25 KB/s of 48, dry every second.  Not amazon.speech.sim's high performance
+      lock (WifiController ignores locks with the screen on).  Fixed by a Wi-Fi driver of our own build: Broadcom's
+      bcmdhd 101.10.591.95.46 (2025-02) as amazon-oss ported it to rook, built against Amazon's 3.18.19 MT8163 tree
+      (douglas, Fire HD 8 2017: the Spot's own is not public) with devices/rook/kconfig on douglas_defconfig and the
+      GCC 4.9 donut uses, our devices/rook/bcmdhd.patch (no LAB126_DISABLE_PS; CONFIG_ROOK and GET_CUSTOM_MAC_ENABLE
+      for the C code, else the regulator was NULL, an oops at load, and the MAC the chip's 00:90:4c placeholder; the
+      MAC from /proc/idme/mac_addr as Amazon's; no WPA3 SAE, cfg80211's external auth being 4.17+; no build time or
+      folder in it: reproducible).  The config: kallsyms of the Spot against a douglas build, then
+      tools/kabi_compare.py, which compares the struct offsets ~1400 kernel functions use in our vmlinux and the
+      Spot's Image: douglas had WIRELESS_EXT (its MediaTek combo Wi-Fi selects it), 16 bytes more in net_device; with
+      the combo off and MTK_USBFSH on, net_device, sk_buff, urb, usb_device, wiphy all at the Spot's offsets.  struct
+      module's init/exit at the stock module's (0x128, 0x1f8), every one of its 237 imports exported.  Fire OS's
+      Wi-Fi HAL insmods /system/lib/modules/bcmdhd.ko at Wi-Fi on: sysinstall.sh puts ours there (device.conf
+      WIFI_DRIVER), stock's as .pre-hassmic.  make kernel-tools fetches tree, compiler and driver by commit
+      (kernel-tools.sh: a .git URL is a repository and a commit); two builds byte-identical.  Cold boot: loaded at
+      16 s, the Spot's MAC, PM 2 kept by the driver.
 - [x] Frozen at the first wake word after 18.6 h (2026-10-13, GitHub issue #31; Echo Dot 3 on 2026.10.12.210015, up
       ~24 h): wake word, wake sound, listening ring, then nothing; buttons dead (action logged, not acted on), no
       pipeline timeout, power cycle needed. HA ran a whole pipeline meanwhile. The log's last hassmic lines: `whisper:

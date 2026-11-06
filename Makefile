@@ -86,10 +86,23 @@ else
 all: kmod-missing
 endif
 endif
+# A Wi-Fi driver of our own build in place of the firmware's (device.mk WIFIDRV; rook: Broadcom's bcmdhd, see there),
+# against the same prepared tree: its source from WIFIDRV_URL at WIFIDRV_COMMIT (make kernel-tools), our changes in
+# devices/<codename>/$(WIFIDRV).patch.  Installed over the firmware's by sysinstall.sh (device.conf WIFI_DRIVER).
+WIFIDRV_SRC ?= $(CURDIR)/toolchain/$(WIFIDRV)-$(WIFIDRV_COMMIT)
+ifneq ($(WIFIDRV),)
+ifneq ($(and $(wildcard $(KSRC)/Makefile),$(wildcard $(KCROSS)gcc),$(wildcard $(WIFIDRV_SRC)/.done)),)
+all: $(OUT)/$(WIFIDRV).ko
+else
+all: wifidrv-missing
+endif
+endif
 kmod-missing:
 	@echo "note: $(OUT)/$(KMOD).ko not built (Wi-Fi motion on $(DEVICE)): needs $(KSRC) and $(KCROSS)gcc: make kernel-tools DEVICE=$(DEVICE)"
+wifidrv-missing:
+	@echo "note: $(OUT)/$(WIFIDRV).ko not built (Wi-Fi driver of $(DEVICE)): needs $(KSRC), $(KCROSS)gcc and $(WIFIDRV_SRC): make kernel-tools DEVICE=$(DEVICE)"
 kernel-tools:
-	$(if $(KMOD),scripts/kernel-tools.sh $(KSRC) $(KCROSS) $(KSRC_URL) $(KSRC_SHA256) $(KCC_URL) $(KCC_DIGEST))
+	$(if $(KMOD)$(WIFIDRV),scripts/kernel-tools.sh $(KSRC) $(KCROSS) $(KSRC_URL) $(KSRC_SHA256) $(KCC_URL) $(KCC_DIGEST) $(if $(WIFIDRV),$(WIFIDRV_SRC) $(WIFIDRV_URL) $(WIFIDRV_COMMIT)))
 
 ifneq ($(KCONFIG),)
 $(OUT)/ktree/.config: $(KCONFIG)
@@ -98,10 +111,12 @@ $(OUT)/ktree/.config: $(KCONFIG)
 	cp $< $@
 	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree olddefconfig modules_prepare
 else
-# the fragment last: of two lines for one option, the later counts
+# the fragment last: of two lines for one option, the later counts.  On the architecture's defconfig, or a vendor's
+# (KDEFCONFIG: rook's on Amazon's douglas_defconfig)
+KDEFCONFIG ?= defconfig
 $(OUT)/ktree/.config: $(KFRAG)
 	@mkdir -p $(OUT)/ktree
-	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree defconfig
+	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree $(KDEFCONFIG)
 	cat $< >> $@
 	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree olddefconfig modules_prepare 2>&1 | grep -v -e 'override: reassigning' -e 'changes choice state' -e '^$$' || true
 endif
@@ -114,6 +129,13 @@ $(OUT)/$(KMOD).ko: src/kmod/$(KMOD).c src/kmod/Kbuild $(OUT)/ktree/.config $(wil
 	$(if $(wildcard devices/$(DEVICE)/Module.symvers),cp devices/$(DEVICE)/Module.symvers $(OUT)/ktree/Module.symvers)
 	$(KMAKE) -C $(OUT)/ktree M=$(CURDIR)/$(OUT)/kmod HM_KMOD=$(KMOD) modules 2>&1 | grep -v -e 'Module.symvers' -e 'no dependencies and modversions' || true
 	cp $(OUT)/kmod/$(KMOD).ko $@
+
+# copied, patched and built out of the source folder, per model
+$(OUT)/$(WIFIDRV).ko: $(OUT)/ktree/.config devices/$(DEVICE)/$(WIFIDRV).patch $(WIFIDRV_SRC)/.done
+	rm -rf $(OUT)/wifidrv; mkdir -p $(OUT)/wifidrv; cp -r $(WIFIDRV_SRC)/. $(OUT)/wifidrv/
+	cd $(OUT)/wifidrv && git apply $(CURDIR)/devices/$(DEVICE)/$(WIFIDRV).patch
+	$(KMAKE) -C $(OUT)/ktree M=$(CURDIR)/$(OUT)/wifidrv/$(WIFIDRV_DIR) $(WIFIDRV_ARGS) modules 2>&1 | grep -v -e 'Module.symvers' -e 'no dependencies and modversions' -e 'warning:' -e '^ *|' -e '^ *\^' -e 'In function' -e 'note:' || true
+	cp $(OUT)/wifidrv/$(WIFIDRV_DIR)/$(WIFIDRV).ko $@
 
 ifeq ($(STUBS),1)
 # Written in the list's order, as assembly: the linker lists what it exports from the executable in the order it meets the
@@ -411,4 +433,4 @@ version:
 clean:
 	rm -rf build
 
-.PHONY: all host unit $(addprefix unit-,$(UNIT_TESTS)) version clean kmod-missing kernel-tools FORCE
+.PHONY: all host unit $(addprefix unit-,$(UNIT_TESTS)) version clean kmod-missing wifidrv-missing kernel-tools FORCE

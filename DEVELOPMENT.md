@@ -130,7 +130,15 @@ build:
 ```sh
 make kernel-tools DEVICE=donut      # kernel 4.4.22 (arm64), aarch64-linux-android-4.9
 make kernel-tools DEVICE=radar      # biscuit, radar: kernel 3.18.19 (ARM), arm-eabi-4.8
+make kernel-tools DEVICE=rook       # Amazon's 3.18.19 MT8163 tree (git, by commit), aarch64-linux-android-4.9 and the
+                                    # Wi-Fi driver's source: rook's own bcmdhd.ko (device.mk WIFIDRV), not a kmod
 ```
+
+On rook the same tools build a whole Wi-Fi driver (`WIFIDRV`, devices/rook/device.mk says why): Broadcom's bcmdhd at a
+pinned commit, `devices/rook/bcmdhd.patch` applied by `git apply`, against the tree prepared with `devices/rook/kconfig`
+on Amazon's `douglas_defconfig` (`KDEFCONFIG`).  A `.git` `KSRC_URL` is a repository and `KSRC_SHA256` a commit of it.
+`tools/kabi_compare.py VMLINUX IMAGE KALLSYMS` checks such a tree against a device's kernel: the struct offsets each
+kernel function uses, ours against the device's Image (decompressed boot.img kernel) and `/proc/kallsyms`.
 
 The pins are in `device.mk` (`KSRC_URL`, `KSRC_SHA256`, `KCC_URL`, `KCC_DIGEST`), or the Makefile's defaults for the
 3.18 models: the sources by their checksum, the compiler by a digest over its files, since googlesource packs its
