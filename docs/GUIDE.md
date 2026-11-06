@@ -427,7 +427,8 @@ Beyond the README's two figures:
   Home Assistant's. "Clock face" (Lights, a picture of each; also a select in Home Assistant) swaps that digital clock
   for one of the Spot's own analog faces, the ones Alexa's clock offered (Abstract shapes, Beach, Zen and the rest):
   each design's default face on its default background, with a ticking second hand, and its night version (dimmed
-  colours, the background dark) when the room is dark (under 3 lux by the Spot's light sensor, back over 10). hassmic draws them from the
+  colours, the background dark) when the Spot's light sensor says the room is dark. The screen's brightness follows the
+  room too (Android's own auto brightness on that sensor, as on a stock Spot). hassmic draws them from the
   firmware's own clock-face package where it lies: nothing is downloaded or copied, and Alexa's clock app stays off.
   Notifications, the date window and Alexa's alerts on the faces are left out, and so are Photos and the four
   Wallpaper designs: their pictures came from Amazon's online services.

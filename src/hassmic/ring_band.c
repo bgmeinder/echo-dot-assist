@@ -669,7 +669,7 @@ int ring_band_clock(int set)
  * "digital"): the firmware's own art (clockface.c), drawn by the renderer from the package where it lies (kinds 7 and
  * 8 once per renderer, faces_told), every second for the second hand: cleared (6), each part (4: background, dial,
  * hands), shown (5).  Night (the night images and tints, as stock's dimmed face): the room dark by the light sensor
- * (under 3 lux, back over 10), or 21:00-07:00 where there is none.  clock_shown is then 100 + the face */
+ * (under board.lux_dark, 3 lux where 0; light again at 3 times it), or 21:00-07:00 where there is none.  clock_shown is then 100 + the face */
 static int clock_face, faces_told, face_night;
 
 int ring_band_face(int set)
@@ -691,7 +691,8 @@ static int face_draw(int fd, int tmpl, const struct tm *tm, int new_minute)
     }
     if (new_minute) {
         float lux = core_lux();
-        if (lux == lux) face_night = face_night ? lux < 10 : lux < 3;
+        float dark = board.lux_dark > 0 ? board.lux_dark : 3;
+        if (lux == lux) face_night = face_night ? lux < 3 * dark : lux < dark;
         else face_night = tm->tm_hour >= 21 || tm->tm_hour < 7;
     }
     struct cf_op ops[48];

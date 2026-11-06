@@ -55,6 +55,9 @@ struct board {
     const char *thermal_type;       /* thermal zone reported as SoC temperature */
     const char *light_sensor[3];    /* files the stock light sensor HAL reads lux from, first that opens; {NULL}: none.  "tcs3400:<dir>": raw channels of
                                        a TCS3400 under <dir>/input*, main.c lux_tcs3400 */
+    /* lux under which the room counts as dark (the clock faces' night version, ring_band.c), back to light at 3 times it;
+     * 0: 3 lux.  A sensor behind dark glass reads far under the room's true light (the Spot: 0.56 in a lit room) */
+    float lux_dark;
     const char *jack_state;         /* the headphone jack's switch ("0" out, "1"/"2" in): main.c sets headphone_volume % of
                                        the volume while headphones are in and puts the speaker's back after; NULL: none */
     int screen_round;               /* 1: a round screen (rook): ring_band.c draws the light ring as a ring at the rim,

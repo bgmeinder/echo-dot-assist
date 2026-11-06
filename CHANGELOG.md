@@ -10,8 +10,10 @@ What changed for people using the Echo, newest first. Details and measurements a
   faces are read from the Spot's own firmware; nothing is downloaded and Alexa stays off (the designs whose pictures
   came from Amazon's online photos are left out). "Digital" keeps hassmic's
   clock. "Clock on the screen" must be on for either.
-- **Echo Spot: its light sensor.** "Light sensor" (Features) now works on the Spot too: an Illuminance sensor in Home
-  Assistant, in lux.
+- **Echo Spot: its light sensor, and the screen's brightness by it.** "Light sensor" (Features) now works on the Spot
+  too: an Illuminance sensor in Home Assistant. The screen now dims and brightens with the room, as a stock Spot's
+  did, instead of staying at half brightness. The sensor sits behind the Spot's dark glass and reads far under the
+  room's real light (about half a lux in a lit room), so compare its numbers with each other, not with other sensors.
 
 ## 2026-11-05
 

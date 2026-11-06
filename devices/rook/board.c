@@ -87,6 +87,9 @@ const struct board board = {
     /* a TI OPT3001 on I2C 0-0044 (driver opt300x, MediaTek's "alsps"), through IIO: calibrated lux as text, world-readable
      * (0.22 in a dark room, 2026-11-06); the stable path, not the iio:device number's own */
     .light_sensor = { "/sys/bus/i2c/devices/0-0044/iio:device0/in_illuminance_input", NULL },
+    /* behind the Spot's dark glass it reads 0.55-0.57 in a lit room and 0 with the lights off (2026-11-06, a two-minute
+     * recording): dark under 0.1, light again over 0.3 */
+    .lux_dark = 0.1f,
     .jack_state = "/sys/class/switch/h2w/state",                 /* 0 out, 1 headset, 2 headphones (2026-11-05) */
     .screen_round = 1,                                              /* the ring drawn around the rim of the round screen (ring_band.c) */
     /* the Spot's clock-face package: Amazon's analog faces as data (templates, faces, backgrounds) and their art,

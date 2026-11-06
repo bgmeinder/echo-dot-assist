@@ -3102,7 +3102,13 @@ Run in this order. Each step says what it proves.
       ring_band.c draws once a second (the wait ends just past the next second), night by the light sensor (under 3
       lux, back over 10; 21:00-07:00 where there is none).  rook's light sensor: a TI OPT3001 on I2C 0-0044 (driver
       opt300x, MediaTek's "alsps"), lux as text in /sys/bus/i2c/devices/0-0044/iio:device0/in_illuminance_input,
-      world-readable: board.light_sensor; HA's Illuminance read 0.22 lx in a dark room, as the file (2026-11-06).  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (28 options)
+      world-readable: board.light_sensor; HA's Illuminance read 0.22 lx in a dark room, as the file (2026-11-06).
+      Recorded once a second for two minutes with the room's lights off and on: 0.55-0.57 lit, 0 dark (the dark glass:
+      some 1/100 of the light), so board.lux_dark (0.1 on rook, light again at 3 times it; 3 lux where 0) sets the
+      faces' night; Beach's day version came up with the lights on (screenshot).  The backlight: device.conf had
+      Android's brightness manual at 120 of 255 (half in a dark room, #126's complaint on the Show 5); Android's auto
+      mode on the same sensor (screen_brightness_mode=1) follows within 3 s: 38 lit, 1 dark, which looked right at
+      night by the owner's eye.  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (28 options)
       switches within a second; screenshots of Abstract shapes and Beach at night (2026-11-06).  Not yet: the faces by
       day seen on the device, a template's other faces and backgrounds (clockface_styles/colors exist, no setting).
       (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
