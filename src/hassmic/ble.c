@@ -68,6 +68,7 @@
 #endif
 #include "ble.h"
 #include "board.h"
+#include "bt_uart.h"
 #include "core.h"
 #include "ble_crypto.h"
 #include "hci.h"
@@ -116,6 +117,7 @@ static long long gatt_quiet_until, gatt_spell, gatt_break_until;   /* controller
 static char bdaddr[18];                         /* set once, before anything reads it */
 
 static unsigned char in[2048]; static size_t have;             /* H4 stream: reads may split or join packets */
+long ble_resync_bytes;                                          /* skipped to find a packet start: a2dp.c's rx counters */
 static int cc_op, cc_status;                                    /* last Command Complete / Status */
 static unsigned char cc_ret[72];                                /* its return parameters after the status */
 static struct ble_adv batch[BLE_BATCH]; static int nbatch; static struct timespec batch_t0;
@@ -1184,7 +1186,7 @@ static int pump(int ms)
         if (have < 1) break;
         if (in[0] == H4_EVT) { if (have < 3) break; len = 3 + in[2]; }
         else if (in[0] == H4_ACL) { if (have < 5) break; len = 5 + u16(in + 3); }
-        else { memmove(in, in + 1, --have); continue; }        /* not a packet start: resync (after a partial drain) */
+        else { memmove(in, in + 1, --have); ble_resync_bytes++; continue; }   /* not a packet start: resync (after a partial drain) */
         if (len > sizeof in) return -1;
         if (have < len) break;
         memcpy(pkt, in, len); memmove(in, in + len, have - len); have -= len;      /* handlers may pump again */
@@ -1213,6 +1215,33 @@ static int cmd(unsigned op, const void *par, unsigned n)
 
 /* HASSMIC_BT_DEV: another controller, for tests (tests/fake_improv.py plays one on a pseudo terminal) */
 static const char *bt_dev(void) { const char *e = getenv("HASSMIC_BT_DEV"); return e && *e ? e : board.bt_dev; }
+/* the device node itself, "uart:" taken off */
+static const char *bt_path(void) { const char *d = bt_dev(); return d && !strncmp(d, "uart:", 5) ? d + 5 : d; }
+
+/* The controller's address as idme has it, 12 hex digits, like btmac.sh reads it; "" if there is none.  HASSMIC_BT_MAC:
+ * idme's file on the PC (tests) */
+static void bdaddr_hex(char h[16])
+{
+    const char *e = getenv("HASSMIC_BT_MAC"), *p = e && *e ? e : board.bt_mac;
+    FILE *f = p ? fopen(p, "r") : NULL;
+    h[0] = 0;
+    if (f) { if (fscanf(f, "%12s", h) != 1) h[0] = 0; fclose(f); }
+    if (strlen(h) != 12) h[0] = 0;
+}
+
+/* the controller opened: a character device as it is, or a UART set up with its patch (bt_uart.c) */
+static int bt_open(void)
+{
+    const char *d = bt_dev();
+    if (!d || strncmp(d, "uart:", 5)) return open(d, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    uint8_t a[6], *ap = NULL; char h[16]; unsigned x[6];
+    bdaddr_hex(h);
+    if (h[0] && sscanf(h, "%2x%2x%2x%2x%2x%2x", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5]) == 6) {
+        for (int i = 0; i < 6; i++) a[i] = (uint8_t)x[i];
+        ap = a;
+    }
+    return bt_uart_open(d + 5, board.bt_patch, board.bt_baud ? board.bt_baud : 115200, ap);
+}
 
 static int stock_bt_running(void)
 {
@@ -1227,14 +1256,11 @@ static int stock_bt_running(void)
 #endif
 }
 
-/* The controller's address, from idme like btmac.sh does; the chip carries the same one.  HASSMIC_BT_MAC: idme's file
- * on the PC (tests) */
+/* The controller's address, from idme (bdaddr_hex); the chip carries the same one */
 static void read_bdaddr(void)
 {
-    const char *e = getenv("HASSMIC_BT_MAC");
-    char h[16] = ""; FILE *f = fopen(e && *e ? e : board.bt_mac, "r");
-    if (f) { if (fscanf(f, "%12s", h) != 1) h[0] = 0; fclose(f); }
-    if (strlen(h) == 12)
+    char h[16]; bdaddr_hex(h);
+    if (h[0])
         snprintf(bdaddr, sizeof bdaddr, "%.2s:%.2s:%.2s:%.2s:%.2s:%.2s", h, h + 2, h + 4, h + 6, h + 8, h + 10);
     for (char *c = bdaddr; *c; c++) if (*c >= 'a' && *c <= 'f') *c -= 32;
 }
@@ -1481,7 +1507,7 @@ static void *thread(void *arg)
     (void)arg;
     for (int said = 0;; sleep(5)) {
         if (stock_bt_running()) { if (!said++) fprintf(stderr, "bluetooth: waiting for %s to stop\n", board.bt_service); continue; }
-        if ((fd = open(bt_dev(), O_RDWR | O_NOCTTY | O_CLOEXEC)) < 0) { if (!said++) fprintf(stderr, "bluetooth: %s: %s\n", bt_dev(), strerror(errno)); continue; }
+        if ((fd = bt_open()) < 0) { if (!said++) fprintf(stderr, "bluetooth: %s: %s\n", bt_dev(), strerror(errno)); continue; }
         /* Left unread by the previous user.  A hassmic that was killed while scanning leaves the chip scanning, so this
          * does not run dry: stop after a moment, the reset stops the flow and pump() finds the packet boundaries again. */
         struct timespec t0; now(&t0);
@@ -1548,7 +1574,7 @@ static void *thread(void *arg)
 
 /* -B leaves the radio to the stock stack: then nothing of ours may show (radar installs with -B; its "Bluetooth pairing"
  * switch was listed and fell back off at once, as no thread ever took the request) */
-int ble_present(void) { return core_bluetooth(-1) && access(bt_dev(), F_OK) == 0; }
+int ble_present(void) { return core_bluetooth(-1) && access(bt_path(), F_OK) == 0; }
 const char *ble_mac(void) { return bdaddr; }
 int ble_scanning(void) { return atomic_load(&shown) != 0; }       /* not the brief pauses: HA would hear "idle" for good */
 

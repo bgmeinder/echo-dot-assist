@@ -34,10 +34,16 @@ struct board {
                                        its gpio-privacy holds the enable line 1 s, then changes state); NULL: no early notice */
     int privacy_settle_ms;          /* with privacy_button: how long a press is believed before the latch must have confirmed it */
 
-    /* Bluetooth: raw HCI (H4) character device, the init service that owns it in stock, where the address is stored */
+    /* Bluetooth: raw HCI (H4) character device, the init service that owns it in stock, where the address is stored.
+     * "uart:<tty>": a controller on a UART instead (rook's Broadcom), set up by bt_uart.c with bt_patch (its firmware
+     * patch, .hcd) at bt_baud, the address from bt_mac written into it */
     const char *bt_dev;
     const char *bt_service;
     const char *bt_mac;
+    const char *bt_patch;
+    int bt_baud;
+    /* the phone's music buffered before playing, ms (0: 150); reported to the phone as delay, so video keeps in step */
+    int a2dp_buffer_ms;
 
     /* stock assets */
     const char *wake_id;            /* id of the firmware's own wake word model */

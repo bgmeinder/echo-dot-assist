@@ -61,8 +61,17 @@ const struct board board = {
     .privacy_state = "/sys/devices/soc/10010000.keypad/privacy_state",
     .privacy_latch = 1,
 
-    /* Broadcom BCM43569 on a UART (bt_vendor.conf: UartPort /dev/ttyMT1), not the Dots' /dev/stpbt: no Bluetooth yet */
-    .bt_dev = NULL,
+    /* Broadcom BCM43569 on a UART (bt_vendor.conf: UartPort /dev/ttyMT1, bluetooth:radio 0660, hence radio in
+     * DAEMON_GROUPS), not the Dots' /dev/stpbt: bt_uart.c loads its patch where libbt-vendor took it and switches to
+     * 3 Mbaud, libbt-vendor's default target; Android's Bluetooth app is not on the image, the line is free.  Up with
+     * 307 patch records, and again after hassmic restarts (the chip stays patched at 3 Mbaud, 2026-11-05) */
+    .bt_dev = "uart:/dev/ttyMT1",
+    .bt_patch = "/system/vendor/firmware/BCM43569A2_001.003.004.0167.0215.hcd",
+    .bt_baud = 3000000,
+    /* every codec is offered: with the Spot's Wi-Fi on 5 GHz a Pixel's aptX HD (576 kbit/s) came whole and in time, 0
+     * dry-outs a minute; on 2.4 GHz plain aptX already skipped, its Wi-Fi taking the antenna (2026-11-06).
+     * A Pixel's aptX arrives whole but in bursts, gaps up to 140 ms (2026-11-06): 150 ms of buffer had no margin */
+    .a2dp_buffer_ms = 300,
     .bt_service = NULL,
     .bt_mac = "/proc/idme/bt_mac_addr",
 

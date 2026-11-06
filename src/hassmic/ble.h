@@ -37,6 +37,7 @@ struct ble_handler {
 int  ble_present(void);                 /* the radio exists and is ours (not -B; PC build: no) */
 void ble_start(const struct ble_handler *h);    /* controller thread; takes the radio once btmanagerd has stopped.
                                                    Again to set the handler (NULL: none yet) */
+extern long ble_resync_bytes;            /* bytes skipped to find the next H4 packet (a2dp.c's receive counters) */
 const char *ble_mac(void);              /* "AA:BB:CC:DD:EE:FF", "" if unknown */
 int  ble_scanning(void);                /* 1 while scanning, as HA was last told: brief pauses (ble_quiet, GATT) left out */
 int  ble_connections(uint64_t *addrs);  /* slots in use (connecting or connected), their addresses: BLE_MAX_CONN room */

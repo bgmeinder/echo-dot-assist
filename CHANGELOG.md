@@ -1109,6 +1109,12 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   up to 5 minutes.
 - **Echo Spot: Wi-Fi on channels 100 to 144.** The driver ran with China's channel list and never saw an access point
   on those 5 GHz channels; it now uses Amazon's own worldwide setting, as the stock driver did.
+- **Echo Spot: Bluetooth.** hassmic brings up the Spot's Broadcom controller itself (it sits on a serial line and needs
+  its firmware patch loaded first), so the Spot is a Bluetooth proxy for Home Assistant like the Dots, and plays music
+  from a paired phone, aptX HD included. Its Wi-Fi and Bluetooth share one antenna: on 2.4 GHz Wi-Fi the music skips,
+  on 5 GHz it does not.
+- **Bluetooth music from phones on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry
+  every few seconds where its packets arrive unevenly: the phone's clock is measured, not summed.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

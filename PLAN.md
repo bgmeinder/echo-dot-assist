@@ -2930,8 +2930,7 @@ Run in this order. Each step says what it proves.
       44334 frames/s), restarted after a pause; reads -69..+55 ppm.  a2dp_buffer_ms 300 on rook (gaps to 140 ms).
       Logged: once per link the phone's EDR and slots, every dry-out with the last packet's age and the output's queue,
       a 10 s receive window only when something was dropped or over 3 % short.
-      a2dp_codecs.c: board.a2dp_max_kbps leaves out codecs above it (aptX HD 576, aptX 384 kbit/s at 48 kHz: 352 at
-      44.1 kHz offered alone under a cap between the two); board.a2dp_buffer_ms the jitter buffer (150 by default).
+      board.a2dp_buffer_ms the jitter buffer (150 by default).
 - [x] A Wi-Fi driver of our own build (rook, 2026-11-06).  The Spot's phone audio skipped with Wi-Fi power save off.
       Amazon's bcmdhd.ko (1.363.110.17) is built with LAB126_DISABLE_PS: the interface registered
       PM_BLOCK, every power-save request refused (traced: wpa_supplicant's "enabled" after DHCP reached cfg80211, the
@@ -3659,7 +3658,7 @@ Run in this order. Each step says what it proves.
       off the UI thread, goToSleep/wakeUp, a real MA token).
       Open items, one list: docs/re-checkers.md "What a port needs".
 - [~] Echo Spot 1st gen (`rook`, 2026-11-04). crown's SoC (MT8163) on Fire OS 5.5.6.9 (690918120, LVY48F): Android 5.1.1
-      (API 22), kernel 3.18.19, Broadcom CYW43569 (Wi-Fi bcmdhd, Bluetooth on a UART: off), 4 mics, round 480 x 480 screen,
+      (API 22), kernel 3.18.19, Broadcom CYW43569 (Wi-Fi bcmdhd, Bluetooth on a UART: bt_uart.c), 4 mics, round 480 x 480 screen,
       the front end in the audio HAL (OpenSL ES), `libpryon.so` 2.41 with the old decoder API (every symbol hassmic needs).
       Unlocked with amonet-rook-v2.0.0 (fastbrick.bat from Windows), rooted.  Found: the XDA boot-root leaves adb off on
       this firmware (stock `init.fosflags.sh` + `adb_cd.sh` strip adb from `persist.sys.usb.config` on a release-keys
