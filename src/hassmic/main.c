@@ -1421,6 +1421,8 @@ static atomic_int whisper_last = -2;        /* core_whispered */
 static uint64_t whisper_from;               /* lock held: the ring sample the request starts at, 0: not known yet */
 static atomic_uint whisper_gen;             /* whisper_run: runs started (written under lock) */
 static atomic_uint whisper_req;             /* capture thread: whisper_gen when the detector now scoring began */
+static atomic_int reply_whispered;           /* this run's request was scored whispered (on_whisper) */
+static atomic_int whisper_reply_pct = 25;    /* setting whispered_reply_volume */
 
 int core_whispered(void) { return atomic_load(&whisper_last); }
 static int whisper_model;
@@ -1434,6 +1436,7 @@ static void whisper_run(void)
 {
     whisper_from = 0;
     atomic_fetch_add(&whisper_gen, 1);
+    atomic_store(&reply_whispered, 0);                    /* this run's reply at the full volume until it is scored */
     if (atomic_load(&whisper_last) < 0) return;            /* no model, or unknown already */
     atomic_store(&whisper_last, -1);
     if (connected && proto->whispered) proto->whispered(-1);
@@ -1449,6 +1452,7 @@ static void on_whisper(int whispered, int confidence, int threshold)
             stale ? ", too late: the next run started, dropped" : "");
     if (!stale) {
         atomic_store(&whisper_last, whispered);
+        atomic_store(&reply_whispered, whispered);  /* this run's reply: quieter (whisper_gain) */
         if (connected && proto->whispered) proto->whispered(whispered);
     }
     pthread_mutex_unlock(&core_lock);
@@ -2591,20 +2595,20 @@ static void on_pair(void)
 
 /* ---------------------------------------------------------------- playback queue */
 
-struct item { struct item *next; int kind, media; unsigned rate, ch; size_t len; unsigned char data[]; };   /* media: Q_START */
+struct item { struct item *next; int kind, tts; unsigned rate, ch; size_t len; unsigned char data[]; };   /* tts: Q_START's TTS_* */
 enum { Q_START, Q_DATA, Q_STOP };
-static void tts_kind(int media);
+static void tts_kind(int kind);
 
 static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t q_cond = PTHREAD_COND_INITIALIZER;
 static struct item *q_head, *q_tail;
 static size_t q_bytes;
 
-static void q_push(int kind, int media, unsigned rate, unsigned ch, const void *data, size_t len)
+static void q_push(int kind, int tts, unsigned rate, unsigned ch, const void *data, size_t len)
 {
     struct item *it = malloc(sizeof *it + len);
     if (!it) return;
-    it->next = NULL; it->kind = kind; it->media = media; it->rate = rate; it->ch = ch; it->len = len;
+    it->next = NULL; it->kind = kind; it->tts = tts; it->rate = rate; it->ch = ch; it->len = len;
     if (len) memcpy(it->data, data, len);
     pthread_mutex_lock(&q_lock);
     if (q_tail) q_tail->next = it; else q_head = it;
@@ -2635,8 +2639,8 @@ static void *playback_thread(void *arg)
         switch (it->kind) {
         case Q_START:
             if (open) play_close(1);        /* e.g. announcement chime followed by the message */
-            tts_kind(it->media);            /* the TTS stream's volume for what comes now */
-            play_media = it->media; play_rate = it->rate; play_ch = it->ch; play_t0 = 0; play_frames = 0;
+            tts_kind(it->tts);            /* the TTS stream's volume for what comes now */
+            play_media = it->tts == TTS_MEDIA; play_rate = it->rate; play_ch = it->ch; play_t0 = 0; play_frames = 0;
             open = play_open(it->rate, it->ch) == 0;
             if (open) { atomic_store(&tts_on, 1); playback_hint(); }
             if (!open) fprintf(stderr, "play: open %u Hz x%u failed\n", it->rate, it->ch);
@@ -2676,15 +2680,15 @@ static void *playback_thread(void *arg)
     return NULL;
 }
 
-void core_tts_begin(unsigned rate, unsigned channels, int media)
+void core_tts_begin(unsigned rate, unsigned channels, int kind)
 {
     /* wake_wait: a chime and then the message.  -D: the stream stays open, and with it the front end's listening flag
      * (listening(1) of pipeline_start): its cancellers do not adapt during the reply.  As measured on radar (PLAN.md);
      * listening(0) for the reply, as -w remote has it, not tried */
     if (!wake_wait && !core_duplex) { atomic_store(&streaming, 0); mic_stopped(); }
-    if (state != SPEAKING) speak_media = media;
+    if (state != SPEAKING) speak_media = kind == TTS_MEDIA;
     core_set_state(SPEAKING);
-    q_push(Q_START, media, rate, channels, NULL, 0);
+    q_push(Q_START, kind, rate, channels, NULL, 0);
     wake_listen();
 }
 
@@ -3470,6 +3474,8 @@ static int vol_even = 1;                     /* under lock; on by default */
 #define EVEN_FLOOR_DB (-50.0f)
 static struct { int level, linked, offset; } kinds[VOL_KINDS] = { { 40, 0, 0 }, { 40, 0, 0 }, { 40, 0, 0 }, { 40, 1, 0 } };   /* under lock */
 static int tts_media;                        /* under lock: the TTS stream plays Home Assistant's media */
+static int tts_reply;                        /* under lock: ... the pipeline's reply (core_tts_begin TTS_REPLY) */
+
 static int tts_written = -1, main_written = -1;     /* under lock: TTSVolume and MainVolume as we last set them */
 static int speaker_mode;                     /* under lock: SPEAKER_* */
 static int echo_own_volume;                  /* under lock: the Echo's volume, set aside while speaker_mode */
@@ -3485,6 +3491,20 @@ static float want_db(int v) { return !vol_even ? vol_db(v) : v <= 0 ? -INFINITY 
 
 /* lock held: MainVolume (the Show's index) is the volume, as stock; else ours is kept in state/volume.music */
 static int stream_owns_volume(void) { return !vol_split && !vol_even; }
+
+/* A reply to a whispered request: the reply volume taken down to whisper_reply_pct of itself, along the Echo's own
+ * volume curve, as if the user had turned it down that far (25 %: 35 % was too little to hear on the Spot, 2026-11-05).  Whether the volumes are
+ * separate or not: a gain on the TTS stream on top of what mix_gain gives.  Announcements and media are left alone;
+ * they are not answers to the request */
+static float whisper_gain(int v)
+{
+    int pct = atomic_load(&whisper_reply_pct);
+    if (pct >= 100 || v <= 0) return 1;
+    int q = (v * pct + 50) / 100;
+    if (q < 1) q = 1;
+    return powf(10.0f, (vol_db(q) - vol_db(v)) / 20.0f);
+}
+int core_whisper_reply(int set) { if (set >= 10 && set <= 100) atomic_store(&whisper_reply_pct, set); return atomic_load(&whisper_reply_pct); }
 
 /* lock held: what a kind (VOL_*) plays at now, its own volume or the music's moved by its offset */
 static int kind_volume(int k) { return kinds[k].linked ? clamp100(core_volume() + kinds[k].offset) : kinds[k].level; }
@@ -3533,17 +3553,25 @@ static void mix_apply(void)                  /* lock held: the mixer's volumes a
     spk_was = spk;
     a2dp_speaker_volume(loudest());
     audio_music_gain(mix_gain(core_volume()));
-    audio_tts_gain(mix_gain(tts_media ? core_volume() : kind_now(VOL_ASSISTANT)));
+    float tg = mix_gain(tts_media ? core_volume() : kind_now(VOL_ASSISTANT));
+    /* the reply's own volume: its kind's with separate volumes, else the one volume (kinds[] then holds stale levels:
+     * 35 % of the default 40 instead of the Spot's 90 made it -12 dB, "marginally quieter", 2026-11-05) */
+    if (tts_reply && atomic_load(&reply_whispered)) tg *= whisper_gain(kind_now(VOL_ASSISTANT));
+    audio_tts_gain(tg);
     atomic_store(&sounds_q16, (int)lroundf(mix_gain(kind_now(VOL_SOUNDS)) * 65536));
     atomic_store(&timers_q16, (int)lroundf(mix_gain(kind_now(VOL_TIMERS)) * 65536));
     audio_call_gain(mix_gain(kind_now(VOL_CALLS)));
 }
 
-static void tts_kind(int media)              /* the playback thread, at each start of the TTS stream */
+static void tts_kind(int kind)               /* the playback thread, at each start of the TTS stream */
 {
     pthread_mutex_lock(&core_lock);
-    tts_media = media;
-    speak_media = media; duck_busy(state != IDLE && !(state == SPEAKING && media));    /* duck.c: media is no run */
+    tts_media = kind == TTS_MEDIA;
+    tts_reply = kind == TTS_REPLY;
+    speak_media = tts_media; duck_busy(state != IDLE && !(state == SPEAKING && tts_media));    /* duck.c: media is no run */
+    if (tts_reply && atomic_load(&reply_whispered))
+        fprintf(stderr, "whisper: the reply at %d %% of the reply volume (%.1f dB)\n", atomic_load(&whisper_reply_pct),
+                20.0 * log10(whisper_gain(kind_now(VOL_ASSISTANT))));
     mix_apply();
     pthread_mutex_unlock(&core_lock);
 }

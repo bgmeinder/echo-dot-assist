@@ -10,8 +10,11 @@
  * which nothing here sets): an Echo Dot 3 (2026-11-13, 7 whispered and 8 normal German requests, "Alexa" whispered
  * too, replayed from its capture dump) scored 890-993 whispered from the word's end and 0-1 normal, so 922 missed one
  * whispered request and 500 (AHE's own cut-off) misses none.  Sounds without speech (breath, rustling) score high,
- * but only the span up to Home Assistant's VAD end is scored. */
+ * but only the span up to Home Assistant's VAD end is scored.
+ * Without the model (Amazon does not hand it to every device type: the Echo Spot and the Echo Show 5 get a 403 "not
+ * allowlisted") hassmic's own detector takes its place: whisper_voice.c, by how much of the speech has a pitch. */
 #include "whisper.h"
+#include "whisper_voice.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +26,7 @@
 
 static whisper_cb callback;
 static int opened, created, active;     /* created: this request has a detector; active: it takes audio */
+static int own;                         /* no model: whisper_voice.c */
 static unsigned seq;
 static char id[32];
 static uint64_t fed;
@@ -82,7 +86,11 @@ int whisper_open(whisper_cb cb)
     if (opened) return 0;
     callback = cb;
     WhisperApi_setLogEventHandler(on_log);
-    if (WhisperApi_setEventHandler(on_event) || WhisperApi_loadWhisperModelset(MODEL_SET, model())) return -1;
+    if (WhisperApi_setEventHandler(on_event) || WhisperApi_loadWhisperModelset(MODEL_SET, model())) {
+        own = opened = 1;
+        fprintf(stderr, "whisper: no Amazon model (%s), hassmic's own detector by pitch\n", model());
+        return 0;
+    }
     opened = 1;
     fprintf(stderr, "whisper: model %s loaded\n", model());
     return 0;
@@ -113,6 +121,7 @@ static void closed(void) { if (closing) { pthread_join(closer, NULL); closing = 
 void whisper_begin(void)
 {
     if (!opened) return;
+    if (own) { wv_begin(); created = active = 1; return; }
     closed();
     snprintf(id, sizeof id, "hassmic-whisper-%u", ++seq);
     WhisperAudioFormat fmt = { 0, 16000, 16, 1 };
@@ -123,6 +132,7 @@ void whisper_begin(void)
 void whisper_feed(const int16_t *samples, size_t count)
 {
     if (!active || !count) return;
+    if (own) { wv_feed(samples, count); return; }
     if (WhisperApi_pushAudioEvent(id, samples, (uint32_t)count, fed)) { active = 0; return; }
     fed += count;
 }
@@ -130,6 +140,16 @@ void whisper_feed(const int16_t *samples, size_t count)
 void whisper_end(int score)
 {
     if (!created) return;
+    if (own) {
+        int c = wv_end(), sp, vo;
+        created = active = 0;
+        wv_counts(&sp, &vo);
+        if (!score) { fprintf(stderr, "whisper: not scored (the run ended without an end of speech)\n"); return; }
+        if (c < 0) { fprintf(stderr, "whisper: not scored (too little speech to tell, %d frames)\n", sp); return; }
+        fprintf(stderr, "whisper: %d of %d speech frames voiced\n", vo, sp);
+        callback(c > WV_THRESHOLD, c, WV_THRESHOLD);
+        return;
+    }
     const char *why = !score ? "the run ended without an end of speech" : !active ? "the detector refused audio"
                     : fed < 160 ? "no audio" : NULL;
     created = active = 0;

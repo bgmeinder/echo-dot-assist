@@ -1120,6 +1120,10 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   its certificates in a Linux file the Echo does not have. hassmic now gathers the Echo's own store and Let's Encrypt's
   two roots into one file (`cacerts.pem` next to the binary) and checks HTTPS against that, so "Check HTTPS
   certificates" can stay on everywhere. Certificates of eMudhra are left out on every model.
+- **Quieter replies to whispers, on every model.** Whisper a request and the Echo plays its reply quieter ("Reply to a
+  whisper", 25 % of the reply volume by default), whatever assistant answers. Where Amazon's whisper model is not there
+  (Amazon refuses it to the Echo Spot and the Echo Show 5), hassmic tells a whisper by itself: whispered speech has no
+  pitch. "Download from Amazon" says so plainly when Amazon refuses a model, instead of asking for a new login.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

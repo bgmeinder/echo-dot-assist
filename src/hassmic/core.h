@@ -230,7 +230,12 @@ int  core_plugin_told(char *id, size_t cap);
 /* no lock needed */
 /* lock held for this one: switches to SPEAKING.  media: Home Assistant's media, which plays at the main volume (not a
  * reply or an announcement: the Assistant's, with separate volumes) */
-void   core_tts_begin(unsigned rate, unsigned channels, int media);
+/* what the TTS stream plays: the pipeline's reply (a whispered request's at whispered_reply_volume), an announcement
+ * (assistant volume), or Home Assistant's media (play_media, music volume) */
+enum { TTS_REPLY, TTS_MEDIA, TTS_ANNOUNCE };
+void   core_tts_begin(unsigned rate, unsigned channels, int kind);
+/* the setting whispered_reply_volume: the reply to a whispered request at this % of the reply volume (10..100) */
+int    core_whisper_reply(int set);
 void   core_tts_data(const void *pcm, size_t len);
 void   core_tts_end(void);                                  /* drains, then played() and core_pipeline_finish() */
 void   core_tts_abandoned(void);                            /* lock held: a reply that began ends without core_tts_end() */
