@@ -11,6 +11,11 @@ What changed for people using the Echo, newest first. Details and measurements a
   turns out locked after the unlock, it points to the issue before anyone runs the unlock again.
 - **Bluetooth music on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry every few
   seconds where the phone's packets arrive unevenly.
+- **Quieter replies to whispers, on every model.** Whisper a request and the Echo plays its reply quieter ("Reply to a
+  whisper" on the settings page, 25 % of the reply volume by default), whatever assistant answers. Where Amazon's
+  whisper model is not there (the Echo Spot and the Echo Show 5 cannot get it), the Echo tells a whisper by itself:
+  whispered speech has no pitch. "Download from Amazon" no longer lists what Amazon refuses a model, and says so
+  plainly when it refuses something, instead of asking for a new login.
 - **The certificates trusted, in one place.** hassmic now gathers the Echo's own certificate store and its Let's
   Encrypt roots into one file and checks HTTPS against that (on the Spot, the store's file names hid Amazon's root
   from its libcurl). Certificates of eMudhra are left out on every model.

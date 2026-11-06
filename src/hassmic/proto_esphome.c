@@ -818,6 +818,7 @@ static void on_light(const unsigned char *p, const unsigned char *end)      /* l
 
 struct media_job {
     char url[2][1024]; int announce, start_conversation, media;     /* media: play_media, at the main volume */
+    int is_reply;                       /* the pipeline's own reply (core_tts_begin: a whispered request's is quieter) */
     int fd, aborted;                    /* lock held.  aborted: its run was cancelled; it plays nothing and touches no state */
 };
 
@@ -866,7 +867,7 @@ static int tts_begin(struct media_job *job, unsigned rate, unsigned ch)    /* -1
 {
     pthread_mutex_lock(&core_lock);
     int ok = !job->aborted;
-    if (ok) core_tts_begin(rate, ch, job->media);
+    if (ok) core_tts_begin(rate, ch, job->media ? TTS_MEDIA : job->is_reply ? TTS_REPLY : TTS_ANNOUNCE);
     pthread_mutex_unlock(&core_lock);
     return ok ? 0 : -1;
 }
@@ -983,6 +984,7 @@ static void media_start(const char *url0, const char *url1, int announce, int st
     if (!is_reply && (core_state() == LISTENING || core_state() == THINKING)) core_pipeline_finish();
     snprintf(job->url[0], sizeof job->url[0], "%s", url0); snprintf(job->url[1], sizeof job->url[1], "%s", url1);
     job->announce = announce; job->start_conversation = start_conversation; job->media = media; job->fd = -1;
+    job->is_reply = is_reply;
     media_cur = job;
     announcing = announce; media_playing = 1; send_mp_state();
     fprintf(stderr, "media: %s%s\n", announce ? "announce " : "", url1);

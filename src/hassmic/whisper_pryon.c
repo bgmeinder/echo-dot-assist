@@ -7,8 +7,11 @@
  * 995-999, normal and soft voice 0-18, also with 0.5 s before and 1 s of silence after the speech.
  * The stream starts when the wake word is recognised, before its last sound has died away: spoken normally, its tail
  * takes a whispered request down to 895-979 (live, 2026-10-04).  The start given with the end of utterance changes
- * nothing (the whole detector's audio counts), so the first SKIP of each request is not fed at all: then 996-998. */
+ * nothing (the whole detector's audio counts), so the first SKIP of each request is not fed at all: then 996-998.
+ * Without the model (Amazon does not hand it to every device type: the Echo Spot and the Echo Show 5 get a 403 "not
+ * allowlisted") hassmic's own detector takes its place: whisper_voice.c, by how much of the speech has a pitch. */
 #include "whisper.h"
+#include "whisper_voice.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +22,7 @@
 
 static whisper_cb callback;
 static int opened, active, pending;     /* active: a detector takes audio; pending: the last one may still answer */
+static int own;                         /* no model: whisper_voice.c */
 static unsigned seq;
 static char id[32];
 static uint64_t fed, skipped;
@@ -77,7 +81,11 @@ int whisper_open(whisper_cb cb)
     if (opened) return 0;
     callback = cb;
     WhisperApi_setLogEventHandler(on_log);
-    if (WhisperApi_setEventHandler(on_event) || WhisperApi_loadWhisperModelset(MODEL_SET, model())) return -1;
+    if (WhisperApi_setEventHandler(on_event) || WhisperApi_loadWhisperModelset(MODEL_SET, model())) {
+        own = opened = 1;
+        fprintf(stderr, "whisper: no Amazon model (%s), hassmic's own detector by pitch\n", model());
+        return 0;
+    }
     opened = 1;
     fprintf(stderr, "whisper: model %s loaded\n", model());
     return 0;
@@ -96,6 +104,7 @@ static void retire(void)
 void whisper_begin(void)
 {
     if (!opened) return;
+    if (own) { wv_begin(); active = 1; return; }
     retire();
     snprintf(id, sizeof id, "hassmic-whisper-%u", ++seq);
     WhisperAudioFormat fmt = { 0, 16000, 16, 1 };
@@ -106,6 +115,7 @@ void whisper_begin(void)
 void whisper_feed(const int16_t *samples, size_t count)
 {
     if (!active || !count) return;
+    if (own) { wv_feed(samples, count); return; }      /* it skips the first 0.5 s itself */
     if (skipped < SKIP) {
         size_t k = SKIP - skipped < count ? SKIP - skipped : count;
         skipped += k; samples += k; count -= k;
@@ -119,6 +129,15 @@ void whisper_end(int score)
 {
     if (!active) return;
     active = 0;
+    if (own) {
+        int c = wv_end(), sp, vo;
+        wv_counts(&sp, &vo);
+        if (!score) return;
+        if (c < 0) { fprintf(stderr, "whisper: too little speech to tell (%d frames)\n", sp); return; }
+        fprintf(stderr, "whisper: %d of %d speech frames voiced\n", vo, sp);
+        callback(c > WV_THRESHOLD, c, WV_THRESHOLD);
+        return;
+    }
     if (score && fed >= 160 && WhisperApi_pushEndOfUtterance(id, "Utterance-1", 0, fed / 160))
         fprintf(stderr, "whisper: end of utterance refused\n");
     else if (score) fprintf(stderr, "whisper: scoring %.2f s\n", fed / 16000.0);

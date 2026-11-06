@@ -2439,6 +2439,22 @@ Run in this order. Each step says what it proves.
       PEM of the store plus cacerts.pem, rewritten only when it differs, as CAINFO; nothing set where no store is (the
       PC: libcurl's default, never narrowed).  Certificates naming eMudhra are never taken (DISTRUSTED; none in
       rook's 164 roots).  tests/unit/ca_bundle_test.sh (make unit-ca_bundle).
+- [x] Whisper without Amazon's model, and quieter replies to whispers (2026-11-05).  Amazon refuses whisper-static to
+      rook and checkers (403 "not allowlisted for device Type").  whisper_voice.c: 32 ms frames (hop 16), level, and the
+      peak normalised autocorrelation over 80..400 Hz of the signal low-passed at 1 kHz; floor = 10th percentile of the
+      levels, speech = 12 dB over it, voiced = peak > 0.60; whispered when < 36 % of the speech frames are voiced;
+      first 0.5 s skipped (as whisper_pryon's SKIP).  Swept on the corpus (voicing 0.45..0.65, margin 8..16 dB);
+      the C on 465 commands (30 voices, 3 whispering) at 30 and 15 dB SNR: 47/47 whispers, 3 and 1 of 418 normal
+      called whispered (en-us-m-elderly).  whisper_pryon.c falls back to it when the model does not load.
+      tests/unit/whisper_voice_test.c (synthetic vowels and breath).  The reply: core_tts_begin's kind (TTS_REPLY,
+      TTS_MEDIA, TTS_ANNOUNCE; proto_esphome's media_job is_reply), main.c whisper_gain: the reply volume turned down
+      to whispered_reply_volume % of itself along the volume curve (default 35), only for the run whose request was
+      whispered (reply_whispered, cleared at each request).  davs.c: refused artifacts (board.davs_refused for rook
+      and checkers, learned from a 403 into state/davs-refused), "refused" in the status, the page's list leaves
+      them out; the 403 said as "not offered", not "log in again".  On the Spot (2026-11-05): a normal request scored
+      304, a whispered one 710 (18 of 62 speech frames voiced); its reply "marginally quieter": with separate volumes
+      off whisper_gain took the reply level from kinds[] (a stale 40) instead of the volume (90): -12 dB, not -20.
+      Fixed (core_volume() unless vol_split); the log names the dB.  Default 25 %, by ear.
 - [x] Bluetooth on a UART (rook, 2026-11-05).  The Spot's BCM43569 sits on /dev/ttyMT1 (bluetooth:radio 0660; the
       kernel has no Bluetooth stack), unpatched it answers nothing useful.  bt_uart.c (board bt_dev "uart:<tty>",
       bt_patch, bt_baud, bt_mac) does libbt-vendor's sequence: 115200 RTS/CTS, HCI_Reset, Update_Baudrate 0xFC18 to

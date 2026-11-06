@@ -707,12 +707,17 @@ entity reports `smoke_or_co_alarm`, `glass_break`, `dog_bark`, `baby_cry`, `snor
 
 ## Whisper detection
 
-A stock Echo answers a whispered request in a whisper. Here the binary sensor "Last request whispered" tells your
-conversation agent, so it can answer the same way. It uses Amazon's whisper detector on the Echo with a model only
-Amazon hands out: "Download from Amazon" on the settings page, or `scripts/artifacts.sh <echo-ip>` ("Other artifacts" ›
-"Whisper detection"; over Wi-Fi, open debug access first). The model stays through updates; without it there is no sensor.
-Amazon does not hand this model to the Echo Show 5 (it refuses that device type); "Copy models" from a Dot that has it
-is the way there, not yet tried on a Show.
+A stock Echo answers a whispered request in a whisper. Here the Echo plays the reply to a whispered request quieter,
+whatever assistant answers it ("Reply to a whisper" on the settings page: the reply volume turned down to 25 % of
+itself by default; 100 % switches that off; announcements and music are never changed), and the binary sensor "Last
+request whispered" tells your conversation agent, so it can answer briefly too.
+
+Which detector tells a whisper: Amazon's, with a model only Amazon hands out ("Download from Amazon" on the settings
+page, or `scripts/artifacts.sh <echo-ip>`), where it has it; otherwise hassmic's own, which needs no model: whispered
+speech has no pitch, so a request with under 36 % of its speech voiced counts as whispered. Amazon does not hand its
+model to the Echo Spot or the Echo Show 5 (it refuses those device types, and their "Download from Amazon" list leaves
+it out); they use hassmic's own. On the speech corpus (30 voices, three whispering, 15 and 30 dB SNR) hassmic's own
+found every whispered command and called 1–3 of 418 spoken ones whispered, all from one gravelly elderly voice.
 
 The sensor is set when you stop speaking, before speech to text has finished, so the agent's prompt can read it. For
 example, in the LLM conversation agent's instructions. The template finds the sensor of whichever Echo you spoke to,
