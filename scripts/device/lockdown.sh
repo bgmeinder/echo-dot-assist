@@ -394,11 +394,19 @@ load_once() {
 }
 # The same rule by rule.  Stock firewall.sh uses the owner match itself, so the kernel has it; if a rule fails to load
 # all the same, the others still go up this way, and it must not pass silently.
+# The chain is built beside the one in force and takes its place when it is whole: emptied and filled where it stood,
+# it let everything out for as long as that took, seconds rule by rule, and that at every load where this is the only
+# way (rook).
 load_each() {
-    $1 -w -N hassmic_out 2>/dev/null
-    $1 -w -F hassmic_out
+    # A load that died half way left hassmic_new: renamed to hassmic_out where the old chain had gone already, and the
+    # old chain's jump back in place before the leftover's goes, so egress is never without one of them
+    $1 -w -E hassmic_new hassmic_out 2>/dev/null
+    case "$NL$($1 -w -S OUTPUT)$NL" in *"$NL-A OUTPUT -j hassmic_out$NL"*) ;; *) $1 -w -I OUTPUT 1 -j hassmic_out 2>/dev/null;; esac
+    while $1 -w -D OUTPUT -j hassmic_new 2>/dev/null; do :; done
+    $1 -w -N hassmic_new 2>/dev/null
+    $1 -w -F hassmic_new
     rules $1 | while read -r r; do
-        $1 -w $r || case "$r" in
+        $1 -w -A hassmic_new ${r#-A hassmic_out } || case "$r" in
             "-A hassmic_out -m owner --uid-owner $KSUID -j RETURN") echo "!! Kiosk Satellite limited to local addresses ($1)";;
             "-A hassmic_out -m owner --uid-owner "69??" -j DROP") echo "!! plugins' users not shut out ($1): the sandbox alone holds them";;
             *uid-owner*) echo "!! OTA GUARD NOT ACTIVE ($1): take the Echo offline";;
@@ -406,8 +414,10 @@ load_each() {
             *) echo "!! rule not loaded ($1): $r";;
         esac
     done
+    $1 -w -I OUTPUT 1 -j hassmic_new
     while $1 -w -D OUTPUT -j hassmic_out 2>/dev/null; do :; done
-    $1 -w -I OUTPUT 1 -j hassmic_out
+    $1 -w -F hassmic_out 2>/dev/null; $1 -w -X hassmic_out 2>/dev/null
+    $1 -w -E hassmic_new hassmic_out || echo "!! the new rules stay in hassmic_new ($1): the old chain could not go"
     if [ $1 = iptables ]; then
         $1 -w -N hassmic_in 2>/dev/null
         $1 -w -F hassmic_in
@@ -426,7 +436,11 @@ load_each() {
     kiosk_stale "$($1 -w -S)" | while read -r r; do while $1 -w -D $r 2>/dev/null; do :; done; done
     $1 -w -P INPUT DROP
 }
-load() { load_once $1 2>/dev/null || load_once $1 || { echo "!! $1-restore failed twice: loading rule by rule"; load_each $1; }; }
+# Fire OS 5 (rook) has no iptables-restore at all: rule by rule from the start, without the noise
+load() {
+    command -v $1-restore > /dev/null || { load_each $1; return; }
+    load_once $1 2>/dev/null || load_once $1 || { echo "!! $1-restore failed twice: loading rule by rule"; load_each $1; }
+}
 apply() {
     DNS=$(resolvers); kiosk_state
     [ -z "$KSSDP_BY" ] || echo "Kiosk Satellite's DLNA renderer: UDP 1900 not admitted, uid$KSSDP_BY listens there too"

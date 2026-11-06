@@ -50,6 +50,8 @@ struct board {
     const char *light_sensor[3];    /* files the stock light sensor HAL reads lux from, first that opens; {NULL}: none.  "tcs3400:<dir>": raw channels of
                                        a TCS3400 under <dir>/input*, main.c lux_tcs3400.  "tsl2540:<i2c dir>": a TSL2540's
                                        iio:device* there, calibrated from idme, main.c lux_tsl2540 */
+    int screen_round;               /* 1: a round screen (rook): ring_band.c draws the light ring as a ring at the rim,
+                                       light_band = its thickness, instead of a band along the bottom (ringbar's ring mode) */
     int volume_steps;               /* volume_step-NN animations of ledcontroller */
     /* LEDs the light really shows, where that is fewer than stock's animations draw (12): 1 = one RGB LED that shows the
      * first of each frame (the Echo Input's LP5562): nothing turned towards the talker, no LED's own layer (ring.c).
@@ -90,6 +92,11 @@ struct board {
     /* other amplifiers the same model is built with (the Echo Show 5 2nd gen: three, by board revision), each with its
      * own control: tried in order where speaker_gain is not on the card.  Fields as above; {NULL}-terminated, or NULL */
     const struct board_gain { const char *name; int stock, steps, db, min_db, limit; } *speaker_gain_alt;
+    /* a switch of card 0 that mutes the speaker amplifier (an enum or bool whose first item, 0, is off), set off at
+     * start and again whenever it comes back on (spkgain.c): the Echo Spot's "MFP Gpio Mute", the codec's MFP GPIO
+     * line to the amplifier, on from boot and switched off by stock's boot sound tool alone (bootsound/tinyctlplay),
+     * which a satellite does not run.  NULL: none */
+    const char *speaker_unmute;
 };
 
 extern const struct board board;

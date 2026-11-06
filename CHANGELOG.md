@@ -1047,6 +1047,33 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   itself); the action button works.
 - **Not tried on an Echo yet.** All of it passes on the PC; the launcher and the sandbox still have to be seen on a
   device. `PLUGINS=0` in `hassmic.conf` starts hassmic without any of it.
+## 2026-11-19 — The Echo Spot (1st gen, 2017)
+
+- **A new model: the Echo Spot (1st gen, 2017, `rook`).** Unlocked with amonet-rook and rooted, it runs hassmic as
+  the Echo Shows do: Home Assistant adopts it like the other models (wake word, pipeline, replies, Music Assistant
+  over Sendspin once paired), the settings page and the firewall run from boot, and Alexa stays off.
+  It plays the tone Alexa played on it when it starts listening, and the Drop In voice blueprint knows it as an Echo
+  it can call. The settings page's "Download from Amazon" works on it too, through Android's own module loader as
+  Amazon's tool on it does. Its speaker needs one trick: the media server Fire OS starts at boot never passes hassmic's
+  audio on, so the satellite restarts it once at start. Setup, measurements and what is not done yet:
+  [devices/rook/README.md](devices/rook/README.md) (issue #69).
+- **Echo Spot: the light ring around the round screen.** The Echo Shows' light band along the bottom edge would land
+  under the Spot's round bezel, so the lights run around the rim as a ring, as thick as "Light band" says, the
+  talker's side at the bottom; designs and Home Assistant's "Light ring" show on it as on a Dot. The settings page
+  draws and edits designs for the Spot the same way: round, its second view "Screen", the frame thumbnails rings.
+- **Echo Spot: a clock, and what plays, on the screen.** "Clock on the screen" (Lights: off, 24h or 12h) shows the
+  time large in the middle and the date under it, white on black inside the ring, and keeps the screen on; the time and
+  its zone are Home Assistant's. While Music Assistant plays on the Spot, the screen shows the album or book cover with
+  the title and artist in place of the clock.
+- **Echo Spot: Broadcom's 2025 Wi-Fi driver** in place of Amazon's from 2017, which kept Wi-Fi power saving off for
+  good. Installed with hassmic; uninstalling puts Amazon's back.
+- **Echo Spot: adb over Wi-Fi.** The adb in the Spot's boot image is patched as it goes in: Android 5.1's property
+  area made the XDA image's adbd lose its own settings, and it never listened on the network.
+- **Fire OS 5 for other models too:** the build at Android 5.1 (API 22), a static toybox shipped with hassmic (Fire OS
+  5's toolbox has no `tr`, `sed`, `head` or `tail`), the init services in the boot image's ramdisk (5.1's init reads
+  no /system/etc/init), and Magisk's arm64 `magiskpolicy` for the SELinux patch. What 5.1's C library
+  lacks (`getifaddrs`, `if_nameindex`, `open_memstream`) hassmic brings along for such a build; nothing changes on the
+  other models.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

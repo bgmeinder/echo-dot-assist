@@ -123,6 +123,14 @@ def cmd(a):
     if a[:1] == ["-N"]: s["chains"].append(a[1])
     elif a[:1] == ["-F"]: s["rules"] = [r for r in s["rules"] if not r.startswith("-A " + a[1] + " ")]
     elif a[:1] == ["-P"]: s["pol"] = a[2]
+    elif a[:1] == ["-X"]:
+        if any(r.startswith("-A " + a[1] + " ") or r.endswith(" -j " + a[1]) for r in s["rules"]): sys.exit(1)
+        s["chains"] = [c for c in s["chains"] if c != a[1]]
+    elif a[:1] == ["-E"]:
+        if a[2] in s["chains"] or a[1] not in s["chains"]: sys.exit(1)
+        s["chains"] = [a[2] if c == a[1] else c for c in s["chains"]]
+        s["rules"] = [(("-A " + a[2] + r[3 + len(a[1]):]) if r.startswith("-A " + a[1] + " ") else r) for r in s["rules"]]
+        s["rules"] = [(r[:-len(a[1])] + a[2] if r.endswith(" -j " + a[1]) else r) for r in s["rules"]]
     elif a[:1] == ["-A"]: s["rules"].append(" ".join(a))
     elif a[:1] == ["-I"]:
         r = "-A " + a[1] + " " + " ".join(a[3:]); i = next((n for n, x in enumerate(s["rules"]) if x.startswith("-A " + a[1] + " ")), 0)

@@ -46,6 +46,9 @@
  *            ("ds", the device secret, only in a registration by device secret: not the code pair's)
  *   token    as above, header and payload in flags 11 (unpadded), the signature over SHA-256 of the first two parts.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE                 /* dladdr on glibc (the PC build) */
+#endif
 #include "dha.h"
 #include <dlfcn.h>
 #include <stdarg.h>
@@ -92,9 +95,66 @@ static const char *const svc_names[] = { "amazon.security.dha", "fireosdhaservic
 static const char *DHA_SVC = "amazon.security.dha";
 static int svc;                     /* the key is the service's, not a HAL's: its version, 1 (checkers) or 2 (crown) */
 
+/* Fire OS 5 (rook, the Echo Spot) has neither libacehal_dha.so nor the binder service, but the HAL module itself,
+ * hw/amzn_dha.<soc>.so (id "amzn_dha", "Amazon FireOS Device Hardware Authentication module"), which Android's own
+ * loader finds (libhardware hw_get_module_by_class, as the firmware's amzn_dha_tool does).  Its open() gives the
+ * device the module's functions (exported under their C++ names, amznkey_*) take first; given the module instead,
+ * they fault on a null.  What they answer, measured as root on the Spot (2026-11-05): an RSA-2048
+ * SubjectPublicKeyInfo (with the HMAC after it, as a DER [0] 32 bytes), field 1 = the 32-byte HMAC (amzn_dha_hmac
+ * prints the same), no other field, and RSASSA-PSS (SHA-256, salt 32) over the digest it is given: the service's
+ * values, call for call.  So it stands in for the service's calls 3 (key), 4 (HMAC) and 1 (sign), and the token is
+ * Java MAP's drvV1, as on checkers (rook's MAP is Java too, com.amazon.imp).  The TEE behind it is /dev/trustzone,
+ * root:drmrpc: the daemon needs that group (device.conf DAEMON_GROUPS). */
+static const void *hw_dev;
+static int (*hw_pub)(const void *, uint8_t **, uint32_t *);
+static int (*hw_field)(const void *, int, void **, uint32_t *);
+static int (*hw_sign)(const void *, const uint8_t *, uint32_t, uint8_t **, uint32_t *);
+
+static int hw_get(const char *code, const void *in, size_t inlen, uint8_t **val, uint32_t *len)
+{
+    *val = NULL; *len = 0;
+    int r = !strcmp(code, "3") ? hw_pub(hw_dev, val, len)
+          : !strcmp(code, "4") ? hw_field(hw_dev, 1, (void **)val, len)
+          : !strcmp(code, "1") ? hw_sign(hw_dev, in, (uint32_t)inlen, val, len) : -1;
+    if (r || !*val) { free(*val); *val = NULL; return -1; }
+    return 0;
+}
+
+/* hw_module_t's start in a 32-bit build: tag, two versions, id, name, author, methods */
+struct hw_module_head { uint32_t tag; uint16_t mv, hv; const char *id, *name, *author;
+                        const struct { int (*open)(const void *, const char *, void **); } *methods; };
+
+static int hw_load(void)
+{
+    void *lh = dlopen("libhardware.so", RTLD_NOW);
+    int (*get)(const char *, const char *, const void **) =
+        lh ? (int (*)(const char *, const char *, const void **))dlsym(lh, "hw_get_module_by_class") : NULL;
+    const void *mod = NULL;
+    void *dev = NULL;
+    Dl_info di;
+    if (!get || get("amzn_dha", NULL, &mod) || !mod)
+        return -1;
+    const struct hw_module_head *m = mod;
+    if (!m->methods || !m->methods->open || m->methods->open(mod, "amzn_dha", &dev) || !dev)
+        return -1;
+    void *self = dladdr(mod, &di) && di.dli_fname ? dlopen(di.dli_fname, RTLD_NOW | RTLD_NOLOAD) : NULL;
+    if (!self)
+        return -1;
+    hw_pub = (int (*)(const void *, uint8_t **, uint32_t *))dlsym(self, "_Z26amznkey_get_dha_key_publicPK17amzn_dha_module_tPPhPj");
+    hw_field = (int (*)(const void *, int, void **, uint32_t *))dlsym(self, "_Z17amznkey_get_fieldPK17amzn_dha_module_tiPPvPj");
+    hw_sign = (int (*)(const void *, const uint8_t *, uint32_t, uint8_t **, uint32_t *))dlsym(self, "_Z17amznkey_sign_dataPK17amzn_dha_module_tPKhjPPhPj");
+    if (!hw_pub || !hw_field || !hw_sign)
+        return -1;
+    hw_dev = dev;
+    fprintf(stderr, "dha: the attestation module through Android's loader (%s)\n", di.dli_fname);
+    return 0;
+}
+
 /* one transaction through the service tool; the reply's byte[] into *val (malloc'd) and its length; 0, or -1 */
 static int svc_get(const char *code, const void *in, size_t inlen, uint8_t **val, uint32_t *len)
 {
+    if (hw_dev)                     /* rook: the module answers the same calls */
+        return hw_get(code, in, inlen, val, len);
     struct afe_call c;
     enum { TEXT = 48 * 1024, WORDS = 2048 };
     char *text = malloc(TEXT);      /* a 294-byte key prints as ~1.5 kB of hex dump, crown's 5.4 kB chain as ~24 kB */
@@ -163,7 +223,10 @@ static int load(char *err, size_t errsz)
             return svc = v, 0;
         if (v)
             return say(err, errsz, "the attestation service is DHA version %d, which hassmic does not build", v);
-        return say(err, errsz, "no attestation HAL (%s)", dlerror());
+        const char *why = dlerror();
+        if (!hw_load())
+            return svc = 1, 0;      /* rook: Java MAP's drvV1 from the module's answers */
+        return say(err, errsz, "no attestation HAL (%s)", why);
     }
     hal.open = (int (*)(void))dlsym(h, "aceDhaHal_open");
     hal.close = (int (*)(void))dlsym(h, "aceDhaHal_close");

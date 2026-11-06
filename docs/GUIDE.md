@@ -557,6 +557,12 @@ Beyond the README's two figures:
   The volume of voice replies shows in cyan, as on the Dots. The screen wakes for the band and sleeps 5 minutes after the last light (1 minute with
   the microphones off or in Do not disturb); the Screen page's **Screen sleeps after** changes the 5 minutes (0 keeps
   the screen on), and **Clock when idle** shows the time in place of going dark.
+- **Echo Spot (2017)**: its screen is round, so the same lights run around its rim as a ring, as thick as "Light
+  band" says (10 pixels), over whatever the screen shows; the side facing the talker is at the bottom. Designs and
+  the light "Light ring" show on it as on a Dot's ring. While Music Assistant plays on the Spot, the screen shows the
+  cover, large, with the title and the artist under it, in place of the clock. "Clock on the screen" (off, 24h, 12h) puts the time, large,
+  and the date on the screen inside the ring, white on black, and keeps the screen on; the time and its zone are
+  Home Assistant's.
 - **Microphone off** plays Alexa's own sounds. A switch that is already off when hassmic starts is shown, not announced.
 - **Wake sound**: Alexa's own where the firmware has it; the Echo Show 8 1st gen has none and plays hassmic's short blip
   (or one of your own: "Your own sounds", below). On the Echo Show 8 (1st and 2nd gen), the Show 5 2nd gen and the Echo Input a sound
@@ -717,6 +723,8 @@ one Echo. The log says
   <phone>": Home Assistant speaks those words, and only once "Allow the device to perform Home Assistant actions" is
   ticked in the Echo's ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure). Without it
   you hear the chime only. "Bluetooth announcements" on the settings page turns both off and picks their language.
+  On the Echo Spot, Wi-Fi and Bluetooth share one antenna: put it on a 5 GHz network, or a phone's music skips while
+  Wi-Fi is busy on 2.4 GHz.
 
 ### Even volume steps
 

@@ -140,6 +140,13 @@ DEFS    := -DVERSION='"$(VERSION)"' -DBUILD='"$(BUILD)"' -DBUILD_TIME='"$(BUILD_
 # sdk/: the plugins' wire format (plugmsg.h), the same file their client library has
 CFLAGS  := -O2 -Wall -Wextra -fPIE -Isrc/include -Isdk $(DEFS)
 LDFLAGS := -pie -fuse-ld=lld -Wl,--allow-shlib-undefined -Wl,--unresolved-symbols=ignore-in-shared-libs
+# bionic below API 24 (rook: Android 5.1, API 22) lacks getifaddrs and open_memstream: src/hassmic/compat22.c stands in,
+# its header declares them where the NDK's do not (the API level is the number at the end of TARGET)
+API     := $(lastword $(subst androideabi, ,$(TARGET)))
+ifeq ($(shell test $(API) -lt 24 && echo old),old)
+COMPAT  := src/hassmic/compat22.c
+CFLAGS  += -include src/hassmic/compat22.h
+endif
 STOCK_LIBS = $(addprefix $(STOCK)/,$(filter $(LIBS),$(1)))
 
 # The build id is compiled in; make must notice when it changes (a new commit), not only when sources change.
@@ -154,7 +161,13 @@ FORCE:
 BIN := $(OUT)/hassmic $(OUT)/runas $(OUT)/plugrun $(OUT)/otatool $(if $(filter %screen.c,$(SCREEN)),$(OUT)/libhmui.so) $(if $(LEDSHIM),$(OUT)/libhmled.so) \
        $(if $(filter libmixerAPI.so,$(LIBS)),$(OUT)/mixcap $(OUT)/mixplay $(OUT)/latency) \
        $(if $(filter -lOpenSLES,$(SYSLIBS)),$(OUT)/slplay) \
-       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test)
+       $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test) \
+       $(if $(TOYBOX),$(OUT)/toybox)
+
+# A static toybox for a model whose own toolbox lacks what the device scripts use (device.mk TOYBOX := 1: rook, Fire OS 5);
+# tools/mktoybox.sh fetches the pinned source into toolchain/ once and builds it with the NDK
+$(OUT)/toybox: tools/mktoybox.sh
+	NDK=$(NDK) tools/mktoybox.sh $@
 
 .DEFAULT_GOAL := all
 all: $(BIN)
@@ -185,10 +198,23 @@ else
 all: kmod-missing
 endif
 endif
+# A Wi-Fi driver of our own build in place of the firmware's (device.mk WIFIDRV; rook: Broadcom's bcmdhd, see there),
+# against the same prepared tree: its source from WIFIDRV_URL at WIFIDRV_COMMIT (make kernel-tools), our changes in
+# devices/<codename>/$(WIFIDRV).patch.  Installed over the firmware's by sysinstall.sh (device.conf WIFI_DRIVER).
+WIFIDRV_SRC ?= $(CURDIR)/toolchain/$(WIFIDRV)-$(WIFIDRV_COMMIT)
+ifneq ($(WIFIDRV),)
+ifneq ($(and $(wildcard $(KSRC)/Makefile),$(wildcard $(KCROSS)gcc),$(wildcard $(WIFIDRV_SRC)/.done)),)
+all: $(OUT)/$(WIFIDRV).ko
+else
+all: wifidrv-missing
+endif
+endif
 kmod-missing:
 	@echo "note: $(OUT)/$(KMOD).ko not built (Wi-Fi motion on $(DEVICE)): needs $(KSRC) and $(KCROSS)gcc: make kernel-tools DEVICE=$(DEVICE)"
+wifidrv-missing:
+	@echo "note: $(OUT)/$(WIFIDRV).ko not built (Wi-Fi driver of $(DEVICE)): needs $(KSRC), $(KCROSS)gcc and $(WIFIDRV_SRC): make kernel-tools DEVICE=$(DEVICE)"
 kernel-tools:
-	$(if $(KMOD),scripts/kernel-tools.sh $(KSRC) $(KCROSS) $(KSRC_URL) $(KSRC_SHA256) $(KCC_URL) $(KCC_DIGEST))
+	$(if $(KMOD)$(WIFIDRV),scripts/kernel-tools.sh $(KSRC) $(KCROSS) $(KSRC_URL) $(KSRC_SHA256) $(KCC_URL) $(KCC_DIGEST) $(if $(WIFIDRV),$(WIFIDRV_SRC) $(WIFIDRV_URL) $(WIFIDRV_COMMIT)))
 
 ifneq ($(KCONFIG),)
 $(OUT)/ktree/.config: $(KCONFIG)
@@ -197,10 +223,12 @@ $(OUT)/ktree/.config: $(KCONFIG)
 	cp $< $@
 	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree olddefconfig modules_prepare
 else
-# the fragment last: of two lines for one option, the later counts
+# the fragment last: of two lines for one option, the later counts.  On the architecture's defconfig, or a vendor's
+# (KDEFCONFIG: rook's on Amazon's douglas_defconfig)
+KDEFCONFIG ?= defconfig
 $(OUT)/ktree/.config: $(KFRAG)
 	@mkdir -p $(OUT)/ktree
-	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree defconfig
+	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree $(KDEFCONFIG)
 	cat $< >> $@
 	$(KMAKE) -C $(KSRC) O=$(CURDIR)/$(OUT)/ktree olddefconfig modules_prepare 2>&1 | grep -v -e 'override: reassigning' -e 'changes choice state' -e '^$$' || true
 endif
@@ -216,6 +244,13 @@ $(OUT)/$(KMOD).ko: src/kmod/$(KMOD).c src/kmod/Kbuild $(OUT)/ktree/.config $(wil
 	$(KMAKE) -C $(OUT)/ktree M=$(CURDIR)/$(OUT)/kmod HM_KMOD=$(KMOD) modules 2>&1 | grep -v -e 'Module.symvers' -e 'no dependencies and modversions' || true
 	$(if $(KMOD_INIT),python3 tools/kmod-init.py $(OUT)/kmod/$(KMOD).ko $(KMOD_INIT))
 	cp $(OUT)/kmod/$(KMOD).ko $@
+
+# copied, patched and built out of the source folder, per model
+$(OUT)/$(WIFIDRV).ko: $(OUT)/ktree/.config devices/$(DEVICE)/$(WIFIDRV).patch $(WIFIDRV_SRC)/.done
+	rm -rf $(OUT)/wifidrv; mkdir -p $(OUT)/wifidrv; cp -r $(WIFIDRV_SRC)/. $(OUT)/wifidrv/
+	cd $(OUT)/wifidrv && git apply $(CURDIR)/devices/$(DEVICE)/$(WIFIDRV).patch
+	$(KMAKE) -C $(OUT)/ktree M=$(CURDIR)/$(OUT)/wifidrv/$(WIFIDRV_DIR) $(WIFIDRV_ARGS) modules 2>&1 | grep -v -e 'Module.symvers' -e 'no dependencies and modversions' -e 'warning:' -e '^ *|' -e '^ *\^' -e 'In function' -e 'note:' || true
+	cp $(OUT)/wifidrv/$(WIFIDRV_DIR)/$(WIFIDRV).ko $@
 
 ifeq ($(STUBS),1)
 # Written in the list's order, as assembly: the linker lists what it exports from the executable in the order it meets the
@@ -360,7 +395,7 @@ build/web_assets.c: tools/embed.py $(foreach w,$(WEB),$(firstword $(subst :, ,$(
 
 # SYSLIBS (device.mk): NDK system libraries a backend needs beside the stock ones (-lOpenSLES on checkers): they come
 # with the NDK, so no stubs are needed for them.
-$(OUT)/hassmic: $(HASSMIC) $(BOARD) $(AUDIO) $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(addprefix $(STOCK)/,$(LIBS))
+$(OUT)/hassmic: $(HASSMIC) $(BOARD) $(COMPAT) $(AUDIO) $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(addprefix $(STOCK)/,$(LIBS))
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -Isrc/hassmic $(filter %.c,$^) -o $@ $(LDFLAGS) -lm -ldl $(SYSLIBS) $(addprefix $(STOCK)/,$(LIBS))
 
@@ -375,7 +410,7 @@ build/hassmic-host-screen: $(filter-out $(RING) $(SCREEN),$(HASSMIC)) src/hassmi
 	cc -O2 -Wall -Wextra $(DEFS) -Isrc/include -Isdk -Isrc/hassmic $(filter %.c,$^) -o $@ -lpthread -lm -ldl -lopus -lz
 
 # ARM build with file audio but the device's wake word engine, for running under qemu-arm (tools/qrun.sh).
-$(OUT)/hassmic-qemu: $(HASSMIC) $(BOARD) src/hassmic/audio_file.c $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
+$(OUT)/hassmic-qemu: $(HASSMIC) $(BOARD) $(COMPAT) src/hassmic/audio_file.c $(WAKE) $(SOUND) $(WHISPER) $(HASSMIC_H) $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
 	@mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -Isrc/hassmic $(filter %.c,$^) -o $@ $(LDFLAGS) -lm -ldl $(call STOCK_LIBS,libpryon.so libopus.so libz.so)
 
@@ -730,4 +765,4 @@ version:
 clean:
 	rm -rf build
 
-.PHONY: all host host-tests unit $(addprefix unit-,$(UNIT_TESTS)) version clean kmod-missing kernel-tools FORCE
+.PHONY: all host host-tests unit $(addprefix unit-,$(UNIT_TESTS)) version clean kmod-missing wifidrv-missing kernel-tools FORCE

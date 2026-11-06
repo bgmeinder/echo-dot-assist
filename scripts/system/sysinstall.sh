@@ -25,6 +25,13 @@
 # the new file, never half of one), boot.sh last, and the partition goes back to read-only whatever happens.
 umask 022
 MODE=$1 SRC=$2
+# run from install-system.sh over adb before boot.sh ever set a PATH: a model's toybox (device.conf TOYBOX, rook)
+# comes along in SRC, and this script's cut, stat, du... are its
+if [ -f "$SRC/toybox" ]; then                   # adb push from Windows leaves no x bit: chmod first
+    chmod 755 "$SRC/toybox"; mkdir -p "$SRC/bin"
+    for a in $("$SRC/toybox"); do ln -sf "$SRC/toybox" "$SRC/bin/$a"; done
+    export PATH="$SRC/bin:$PATH"
+fi
 H=/system/hassmic
 RC=/system/etc/init/hassmic.rc
 LR=/system/etc/led-resources
@@ -37,7 +44,7 @@ SYSLABEL=u:object_r:system_file:s0
 say() { echo "sysinstall $MODE: $*"; }
 case "$MODE" in install|factory|uninstall|leds) ;; *) say "usage: sysinstall.sh install|factory|uninstall|leds SRC [DIR]"; exit 2;; esac
 [ -x "$SRC/otatool" ] || { say "no $SRC/otatool"; exit 1; }
-[ "$(id -u)" = 0 ] || { say "needs root"; exit 1; }
+case "$(id -u)" in 0|uid=0\(*) ;; *) say "needs root"; exit 1;; esac     # Fire OS 5's toolbox id ignores -u (rook)
 
 if [ "$MODE" = leds ]; then
     L=$3
@@ -174,6 +181,10 @@ if [ "$MODE" = uninstall ]; then
         [ -f /system/etc/$f.pre-hassmic ] && { staged=; new $LR/$f /system/etc/$f.pre-hassmic 644 0:0 $SYSLABEL; commit; rm /system/etc/$f.pre-hassmic; }
     done
     rm -f $LR/hassmic_*.animation $LR/*.hassmic_*.animation_bin /system/etc/hassmic-leds.digest
+    wd=$(conf_get WIFI_DRIVER); wdst=${wd#*:}
+    if [ -n "$wd" ] && [ -f "$wdst.pre-hassmic" ]; then
+        staged=; new "$wdst" "$wdst.pre-hassmic" 644 0:0 $SYSLABEL; commit; rm "$wdst.pre-hassmic"; say "stock's Wi-Fi driver back"
+    fi
     rm -rf $H $RC $HOMEDIR; sync
     say "hassmic removed from the system partition"
     exit 0
@@ -201,13 +212,19 @@ for f in "$SRC"/*; do
     sepolicy) [ "$MODE" = install ] && [ -z "$PVOL" ] || continue      # athena's goes onto /vendor
               [ -f $POLICY.pre-hassmic ] || cost $POLICY $POLICY.pre-hassmic
               cost "$f" $POLICY;;
-    hassmic.rc) [ -n "$KEEP_INIT" ] || cost "$f" $RC;;
+    hassmic.rc) [ -n "$KEEP_INIT" ] || [ "$(conf_get BOOT_RC)" = 1 ] || cost "$f" $RC;;
     update.pub) [ "$MODE" = install ] && cost "$f" $H/$n;;
     *.wa|*.was) k0=$kb; cost "$f" $H/$n; [ $kb = $k0 ] || wa=1;;    # wa: one of them to write
     *) cost "$f" $H/$n;;
     esac
 done
 [ -z "$home" ] || cost "$SRC/$home" $HOMEDIR/HassmicHome.apk
+# the Wi-Fi driver written over the firmware's, and stock's kept beside it the first time (WIFI_DRIVER, below)
+wd=$(conf_get WIFI_DRIVER)
+if [ -n "$wd" ] && [ -s "$SRC/${wd%%:*}" ]; then
+    [ -f "${wd#*:}.pre-hassmic" ] || cost "${wd#*:}" "${wd#*:}.pre-hassmic"
+    cost "$SRC/${wd%%:*}" "${wd#*:}"
+fi
 room=$(df -k /system | { read -r _; read -r _ _ _ a _; echo "$a"; })
 case "$room" in *[!0-9]*|'') room= wa_fit=0;; *) [ $kb -lt $((room - 1024)) ] && wa_fit=1 || wa_fit=0;; esac
 [ -z "$wa" ] || [ $wa_fit = 1 ] ||
@@ -224,10 +241,21 @@ for f in "$SRC"/*; do
     esac
     new $H/$n "$f" $m 0:2000 $SYSLABEL
 done
-[ -n "$KEEP_INIT" ] || new $RC "$SRC/hassmic.rc" 644 0:0 $SYSLABEL
+# the init rc: in /system/etc/init, or (BOOT_RC, rook: Android 5.1's init reads no such folder) in the boot ramdisk
+# already, put there by scripts/mkbootroot.py; nothing to write here then (nor with KEEP_INIT, cannoli)
+[ -n "$KEEP_INIT" ] || [ "$(conf_get BOOT_RC)" = 1 ] || new $RC "$SRC/hassmic.rc" 644 0:0 $SYSLABEL
 if [ -n "$home" ] && [ -s "$SRC/$home" ]; then
     mkdir -p $HOMEDIR; chown 0:0 $HOMEDIR; chmod 755 $HOMEDIR; chcon $SYSLABEL $HOMEDIR
     new $HOMEDIR/HassmicHome.apk "$SRC/$home" 644 0:0 $SYSLABEL
+fi
+# A Wi-Fi driver of our own build where the system loads it from (device.conf WIFI_DRIVER "<file in the set>:<path>",
+# rook: Broadcom's 2025 bcmdhd for Amazon's, which refuses power save).  Stock's stays beside it as .pre-hassmic, staged
+# first so it is in place before ours; Wi-Fi loads the new one when next switched on (the next boot)
+wd=$(conf_get WIFI_DRIVER)
+if [ -n "$wd" ] && [ -s "$SRC/${wd%%:*}" ]; then
+    wdst=${wd#*:}
+    [ -f "$wdst.pre-hassmic" ] || [ ! -f "$wdst" ] || new "$wdst.pre-hassmic" "$wdst" 644 0:0 $SYSLABEL
+    new "$wdst" "$SRC/${wd%%:*}" 644 0:0 $SYSLABEL
 fi
 if [ "$MODE" = install ] && [ -f "$SRC/sepolicy" ]; then
     # The policy as boot-root left it stays beside it, for --uninstall; staged first, so commit() renames it into place

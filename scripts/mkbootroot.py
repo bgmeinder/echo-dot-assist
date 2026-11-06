@@ -2,7 +2,8 @@
 """mkbootroot: a rooted boot.img from the device's own stock one, in the standard library only.
 
   mkbootroot.py --check BOOT.img            prove the rebuild: stock image in, the same out but for the ID
-  mkbootroot.py BOOT.img OUT.img [--sepolicy FILE] [--adbd FILE] [--no-verity]
+  mkbootroot.py BOOT.img OUT.img [--sepolicy FILE] [--adbd FILE [--adbd-patch OFF:OLD:NEW]...] [--no-verity]
+                [--prop KEY=VALUE]... [--add NAME=FILE]... [--import NAME]... [--absent NAME]...
                                             build the rooted image
   mkbootroot.py --extract BOOT.img NAME OUT a file of the ramdisk (e.g. sepolicy, to patch it)
   mkbootroot.py --cpio BOOT.img OUT         the whole ramdisk, uncompressed (cpio -id < OUT unpacks it)
@@ -38,6 +39,12 @@ In the ramdisk:
   ro.secure, service.adb.root or the FOS flags say (all three tried on a checkers, 2026-10-10);
   a userdebug adbd goes by ro.secure, and with it adb is root in su (the XDA image's, CyanogenMod's, until
   2026-11-09; now Google's Android 7.1.1 emulator image's: scripts/lib/setup.sh adbd_get)
+- with --adbd-patch OFF:OLD:NEW (hex; OFF a file offset): those bytes of that adbd, which must read OLD there.
+  rook (Android 5.1): the XDA adbd's own bionic is Android 7's, and libselinux's selinux_android_setcon calls
+  __system_properties_init again after the switch into su; on 5.1's one-file property area (no directory
+  /dev/__properties__) that second call unmaps the area, and every property read after it is empty: the
+  ro.product.* of its banner and service.adb.tcp.port, so adb over Wi-Fi never listened (2026-11-06, on a Spot: the
+  area gone from adbd's maps, fd still open).  device.conf ADBD_PATCH skips that call (setcon's result 0 returned)
 - init.*.rc: stock's "setprop service.adb.tcp.port 5555" (checkers' init.checkers.rc, on boot) left out, as a
   comment line in its place.  With the changes above it opened a root shell without authentication to the network at
   every boot, until lockdown.sh closed it again; adb over Wi-Fi is hassmic's to open (adb_gate in lockdown.sh).
@@ -46,6 +53,16 @@ In the ramdisk:
 - with --no-verity: "verify" taken out of the fs_mgr flags in every fstab.* that has it, so
   /system mounts without dm-verity and can be written (hassmic's install).  Once it has been
   written, only a boot image without verify may boot it: the stock one finds the hashes wrong.
+- with --prop KEY=VALUE: the line added to default.prop (rook: ro.build.tags=test-keys, so that
+  stock's init.fosflags.sh, whose adb_cd.sh takes a release-keys build for a closed device, leaves
+  adb in persist.sys.usb.config; the first value of a ro. property wins, and default.prop is read
+  before /system/build.prop)
+- with --add NAME=FILE: FILE as a new entry /NAME of the ramdisk (root, 0644), and with --import
+  NAME: "import /NAME" after init.rc's last import.  Android 5.1's init reads no /system/etc/init/,
+  so rook's hassmic.rc goes into the ramdisk this way.
+- with --absent NAME: the model's ramdisk has no NAME, and its edit is left out (rook: no
+  init.fosflags.sh, its rc runs /system/etc/init.fosflags.sh; device.conf BOOT_ABSENT).  Without it a
+  file to edit that is missing is an error, as is one named here that is there after all.
 """
 import hashlib, struct, sys, zlib
 
@@ -127,16 +144,40 @@ def gunzip_mem(data):
     return out
 
 
-def default_prop(data):
+def default_prop(data, props=()):
     for old, new in PROPS:
         assert data.count(old + b"\n") == 1, old + b" not exactly once in default.prop"
         data = data.replace(old + b"\n", new + b"\n")
+    for p in props:                                 # --prop: added, never a second value for a key it has
+        key = p.split(b"=", 1)[0]
+        assert not any(l.startswith(key + b"=") for l in data.split(b"\n")), key + b" is in default.prop already"
+        data += (b"" if data.endswith(b"\n") else b"\n") + p + b"\n"
     return data
+
+
+def rc_imports(data, names):
+    """init.rc: "import /NAME" for each of NAMES after the last import line"""
+    if not names:
+        return None
+    lines = data.split(b"\n")
+    at = [i for i, l in enumerate(lines) if l.startswith(b"import ")]
+    assert at, "--import: init.rc has no import line to follow"
+    last = at[-1]
+    lines[last + 1:last + 1] = [b"import /" + n for n in names]
+    return b"\n".join(lines)
+
+
+def cpio_entry(name, data, mode=0o100644):
+    """a newc entry as the stock ramdisk's are made: root, one link, mtime 0, no device numbers"""
+    hdr = b"070701" + b"".join(b"%08x" % v for v in (
+        0, mode, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(name) + 1, 0))
+    return hdr + name + b"\0" + b"\0" * (-(110 + len(name) + 1) % 4) + data + b"\0" * (-len(data) % 4)
 
 
 RC_OUT = {  # init.*.rc lines that go, -> the comment in their place
     b"setprop service.adb.tcp.port 5555": b"# hassmic: adb over Wi-Fi only when hassmic opens it",
     b"start bootsound_anim": b"# hassmic: no boot chime (it plays at the full volume a satellite keeps)",
+    b"start bootsound": b"# hassmic: no boot chime (it plays at the full volume a satellite keeps)",   # rook's name for it
 }
 
 
@@ -152,6 +193,8 @@ def rc_lines_out(data):
 
 def pattern(name, edit):
     """the key of EDIT that NAME falls under: itself, or the glob of its kind (fstab.*, init.*.rc)"""
+    if name in edit:
+        return name
     if name.startswith(b"fstab.") and b"fstab.*" in edit:
         return b"fstab.*"
     if name.startswith(b"init.") and name.endswith(b".rc") and b"/" not in name and b"init.*.rc" in edit:
@@ -175,21 +218,28 @@ def no_verity(data):
     return b"\n".join(lines) if n else None
 
 
-def edits(sepolicy=None, verity=True, adbd=None):
+def edits(sepolicy=None, verity=True, adbd=None, props=(), imports=(), absent=()):
     """name -> function(data) -> new data, or None to leave that one as it is"""
-    e = {b"default.prop": default_prop, b"init.fosflags.sh": lambda d: FOSFLAGS, b"init.*.rc": rc_lines_out}
+    e = {b"default.prop": lambda d: default_prop(d, props), b"init.fosflags.sh": lambda d: FOSFLAGS,
+         b"init.*.rc": rc_lines_out}
+    if imports:                                     # init.rc itself: the lines out as for the others, then the imports
+        e[b"init.rc"] = lambda d: rc_imports(rc_lines_out(d) or d, imports)
     if sepolicy is not None:
         e[b"sepolicy"] = lambda d: sepolicy
     if adbd is not None:
         e[b"sbin/adbd"] = lambda d: adbd
     if not verity:
         e[b"fstab.*"] = no_verity
+    for n in absent:
+        assert n in e, "--absent: nothing is edited in %s" % n.decode()
+        del e[n]
     return e
 
 
-def edit_cpio(cpio, edit):
-    """Replace the files of EDIT inside the stream; every other byte of an entry stays."""
-    out, off, done = [], 0, set()
+def edit_cpio(cpio, edit, add=()):
+    """Replace the files of EDIT inside the stream; every other byte of an entry stays.  ADD: (name, data) entries
+    put in before the trailer."""
+    out, off, done, names = [], 0, set(), set()
 
     def edited(name, data):
         key = pattern(name, edit)
@@ -208,8 +258,12 @@ def edit_cpio(cpio, edit):
         data_off = (off + 110 + namesize + 3) & ~3
         data = cpio[data_off:data_off + size]
         if name == b"TRAILER!!!":
+            for n, d in add:
+                assert n not in names, "--add: " + n.decode() + " is in the ramdisk already"
+                out.append(cpio_entry(n, d))
             out.append(cpio[off:data_off])  # the trailer and whatever follows it, verbatim
             break
+        names.add(name)
         new = edited(name, data)
         if new is not None:
             f[6] = len(new)
@@ -239,9 +293,11 @@ def entries(cpio):
         off = data_off + size + (-size % 4)
 
 
-def compare(stock, new, label, edit):
+def compare(stock, new, label, edit, added=()):
     a, b = entries(stock), entries(new)
-    assert [e[0] for e in a] == [e[0] for e in b], label + ": the file list changed"
+    assert [e[0] for e in a] + list(added) == [e[0] for e in b], label + ": the file list changed"
+    for n, _, d in b[len(a):]:
+        print("  " + n.decode() + " added (%d bytes)" % len(d))
     for (na, ha, da), (nb, hb, db) in zip(a, b):
         assert na == nb and hb == ha, label + ": " + na.decode() + "'s metadata changed"
         if da != db:
@@ -271,6 +327,15 @@ def main(argv):
         assert i + 1 < len(argv), "--adbd needs a file"
         adbd = open(argv[i + 1], "rb").read()
         del argv[i:i + 2]
+    while "--adbd-patch" in argv:
+        i = argv.index("--adbd-patch")
+        assert i + 1 < len(argv) and adbd is not None, "--adbd-patch needs OFF:OLD:NEW and --adbd"
+        off, old, new = argv[i + 1].split(":")
+        off, old, new = int(off, 0), bytes.fromhex(old), bytes.fromhex(new)
+        assert len(old) == len(new), "--adbd-patch: OLD and NEW differ in length"
+        assert adbd[off:off + len(old)] == old, "--adbd-patch: adbd does not read %s at %#x" % (old.hex(), off)
+        adbd = adbd[:off] + new + adbd[off + len(new):]
+        del argv[i:i + 2]
     while "--sepolicy" in argv:
         i = argv.index("--sepolicy")
         assert i + 1 < len(argv), "--sepolicy needs a file"
@@ -279,6 +344,18 @@ def main(argv):
     if "--no-verity" in argv:
         argv.remove("--no-verity")
         verity = False
+    props, add, imports, absent = [], [], [], []
+    for opt, into in (("--prop", props), ("--add", add), ("--import", imports), ("--absent", absent)):
+        while opt in argv:
+            i = argv.index(opt)
+            assert i + 1 < len(argv), opt + " needs a value"
+            into.append(argv[i + 1])
+            del argv[i:i + 2]
+    props = [p.encode() for p in props]
+    assert all(b"=" in p for p in props), "--prop takes KEY=VALUE"
+    add = [(a.split("=", 1)[0].encode(), open(a.split("=", 1)[1], "rb").read()) for a in add]
+    imports = [n.encode() for n in imports]
+    absent = [n.encode() for n in absent]
     check = argv[:1] == ["--check"]
     argv = argv[1:] if check else argv
     if len(argv) != (1 if check else 2):
@@ -297,11 +374,13 @@ def main(argv):
         print("check: %d of %d bytes differ, all inside the ID" % (len(diff), len(stock)))
         return
 
-    edit = edits(sepolicy, verity, adbd)
-    cpio = edit_cpio(boot.cpio(), edit)
+    edit = edits(sepolicy, verity, adbd, props, imports, absent)
+    there = {n for n, _, _ in entries(boot.cpio())}
+    assert not there & set(absent), "--absent: in the ramdisk after all: %s" % b", ".join(sorted(there & set(absent))).decode()
+    cpio = edit_cpio(boot.cpio(), edit, add)
     boot.trailing = b""  # the stock image's certificate: its sha256 is not ours
     out = boot.assemble(gzip_mem(cpio))
-    compare(boot.cpio(), Boot(out).cpio(), "the built image", edit)
+    compare(boot.cpio(), Boot(out).cpio(), "the built image", edit, [n for n, _ in add])
     open(argv[1], "wb").write(out)
     print("%s: %d bytes, ramdisk blob %d -> %d\n  sha256 %s" %
           (argv[1], len(out), boot.rsz, Boot(out).rsz, hashlib.sha256(out).hexdigest()))

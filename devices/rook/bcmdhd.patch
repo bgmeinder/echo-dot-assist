@@ -1,0 +1,105 @@
+# Our changes to Broadcom's bcmdhd 101.10.591.95.46 as amazon-oss ported it to the Echo Spot (rook), for Amazon's own
+# 3.18.19 kernel (Fire OS 5) instead of their LineageOS 4.9 one (devices/rook/device.mk, Makefile "Wi-Fi driver"):
+#   - no LAB126_DISABLE_PS: Amazon's switch registers the interface PM_BLOCK, refusing every power save request, and the
+#     chip's Wi-Fi then kept the antenna it shares with Bluetooth (a phone's music skipped; 2026-11-05)
+#   - CONFIG_ROOK and GET_CUSTOM_MAC_ENABLE for the C code: on their kernel CONFIG_ROOK comes from its config; here
+#     without it the regulator stayed NULL (an oops at load) and the MAC was the chip's placeholder 00:90:4c:...
+#   - the MAC from /proc/idme/mac_addr, where Amazon's driver read it (the device tree has no platform data)
+#   - no build folder or time in the version string: the module is reproducible as the rest of the bundle
+#   - no WPA3 SAE (cfg80211's external auth is 4.17+), the module named bcmdhd (what Fire OS's Wi-Fi HAL insmods and
+#     looks for), the stock firmware's paths (/vendor/firmware/brcm/)
+--- a/bcmdhd/Makefile
++++ b/bcmdhd/Makefile
+@@ -39,7 +39,7 @@
+ # <<Broadcom-WL-IPTag/Open:>>
+ #
+ 
+-MODULE_NAME := amzn-bcmdhd
++MODULE_NAME := bcmdhd
+ CONFIG_BCMDHD ?= m
+ 
+ #CONFIG_BCMDHD_SDIO := y
+@@ -99,7 +99,7 @@
+ 
+ ifeq ($(CONFIG_ROOK),y)
+ # Rook specific flags
+-DHDCFLAGS += -DLAB126_DISABLE_PS
++DHDCFLAGS += -DCONFIG_ROOK -DGET_CUSTOM_MAC_ENABLE
+ DHDCFLAGS += -DCONFIG_DTS
+ DHDCFLAGS += -DDISABLE_11AC
+ DHDCFLAGS += -DLAB126_HT20_ALL_BANDS
+@@ -149,7 +149,7 @@
+ 	DHDCFLAGS += -DGTK_OFFLOAD_SUPPORT
+ #	DHDCFLAGS += -DWL_STATIC_IF #-DDHD_MAX_STATIC_IFS=2
+ #	DHDCFLAGS += -DWL_STATIC_IFNAME_PREFIX=\"sap%d\"
+-	DHDCFLAGS += -DWL_CLIENT_SAE
++#	DHDCFLAGS += -DWL_CLIENT_SAE
+ 	DHDCFLAGS += -DCONNECT_INFO_WAR -DWL_ROAM_WAR
+ 	DHDCFLAGS += -DVNDR_IE_WAR
+ 	DHDCFLAGS += -DRESTART_AP_WAR -DRXF0OVFL_REINIT_WAR
+@@ -462,8 +462,8 @@
+ else
+ 	DHDCFLAGS += -DDHD_SUPPORT_VFS_CALL
+ ifeq ($(CONFIG_ROOK),y)
+-	DHDCFLAGS += -DCONFIG_BCMDHD_FW_PATH="\"/vendor/firmware/bcm43569a2-firmware.bin\""
+-	DHDCFLAGS += -DCONFIG_BCMDHD_NVRAM_PATH="\"/vendor/firmware/bcm43569a2.nvm\""
++	DHDCFLAGS += -DCONFIG_BCMDHD_FW_PATH="\"/vendor/firmware/brcm/bcm43569a2-firmware.bin\""
++	DHDCFLAGS += -DCONFIG_BCMDHD_NVRAM_PATH="\"/vendor/firmware/brcm/bcm43569a2.nvm\""
+ 	DHDCFLAGS += -DCONFIG_BCMDHD_CLM_PATH="\"/vendor/etc/firmware/clm_bcmdhd.blob\""
+ 	DHDCFLAGS += -DCONFIG_BCMDHD_CONFIG_PATH="\"/vendor/etc/firmware/config.txt\""
+ else
+--- a/bcmdhd/dhd_linux_platdev.c
++++ b/bcmdhd/dhd_linux_platdev.c
+@@ -46,6 +46,7 @@
+ #include <linux/module.h>
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
++#include <linux/fs.h>
+ #include <bcmutils.h>
+ #include <linux_osl.h>
+ #include <dhd_dbg.h>
+@@ -365,6 +366,33 @@
+ 	struct wifi_platform_data *plat_data;
+ 
+ 	DHD_ERROR(("%s\n", __FUNCTION__));
++#ifdef CONFIG_ROOK
++	if (buf && ifidx == 0) {
++		/* the Echo's address as Amazon's driver took it: idme's mac_addr, 12 hex digits */
++		struct file *fp = filp_open("/proc/idme/mac_addr", O_RDONLY, 0);
++		char hex[12];
++		int i, n, ok = 0;
++		if (!IS_ERR(fp)) {
++			n = kernel_read(fp, 0, hex, sizeof(hex));
++			filp_close(fp, NULL);
++			ok = n == (int)sizeof(hex);
++			for (i = 0; ok && i < 12; i++) {
++				char c = hex[i];
++				int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 :
++					c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
++				if (v < 0)
++					ok = 0;
++				else if (i % 2)
++					buf[i / 2] |= v;
++				else
++					buf[i / 2] = v << 4;
++			}
++		}
++		if (ok)
++			return 0;
++		DHD_ERROR(("%s: no MAC address in /proc/idme/mac_addr\n", __FUNCTION__));
++	}
++#endif /* CONFIG_ROOK */
+ 	if (!buf || !adapter || !adapter->wifi_plat_data)
+ 		return -EINVAL;
+ 	plat_data = adapter->wifi_plat_data;
+--- a/bcmdhd/dhd_common.c
++++ b/bcmdhd/dhd_common.c
+@@ -341,6 +341,6 @@
+ #if defined(DHD_DEBUG) && defined(DHD_COMPILED)
+-const char dhd_version[] = DHD_VERSION DHD_COMPILED " compiled on "
+-			__DATE__ " at " __TIME__ "\n\0<TIMESTAMP>";
++/* without the build folder and time: the same sources make the same module (hassmic's bundles are reproducible) */
++const char dhd_version[] = DHD_VERSION;
+ #else
+ const char dhd_version[] = DHD_VERSION;
+ #endif /* DHD_DEBUG && DHD_COMPILED */

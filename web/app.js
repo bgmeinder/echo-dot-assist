@@ -227,7 +227,7 @@ const LAYOUT = {
   voice: [['Microphone', 'mic_level', 'noise_reduction'], ['Mute and wake sound removal', 'mute', 'do_not_disturb', 'wake_sound_removal'],
           ['Requests', 'wake_word_in_request', 'end_of_request', 'stop_ends_listening'], ['Action button', 'multi_press'], ['Timers', 'timer_ring', 'timer_sound', 'timer_stop_any', 'timer_stop_from_others']],
   wake: [['Engine', 'wake_engine'], ['How it hears you', 'speech_language', 'wake_word_adaptation']],
-  lights: [['Brightness', 'led_auto_brightness', 'led_brightness'], ['Position', 'ring_rotation', 'light_band'], ['Live from Home Assistant', 'ring_live'], ['Screen', ...BRIGHTNESS]],
+  lights: [['Brightness', 'led_auto_brightness', 'led_brightness'], ['Position', 'ring_rotation', 'light_band', 'round_clock'], ['Live from Home Assistant', 'ring_live'], ['Screen', ...BRIGHTNESS]],
 };
 
 // help: what it does, in the user's terms.  ha: also in Home Assistant (true), or for features the entities it adds.
@@ -275,6 +275,7 @@ const HELP = {
   screen_timers: { help: 'Timers set on this Echo, on the screen: each one\'s name (or its length) over its time left in large digits with its unit (4:59 min, 1:02:05 h, 45 s) and a bar of what is left, the one that ends first on top; a paused one in grey. When one rings it shows in orange and pulses until it is stopped, with a Stop button. A tap on the timers hides them until the next change, over an app too (the app gets none of those touches while they show). The screen stays on while timers show. What you said and the reply (Speech on screen) go before them while they show. Off by default.' },
   music_on_screen: { help: 'While a track from Music Assistant plays on this Echo, the screen shows the music page (the big cover, title, seek bar and buttons). In place of the face: only where the face is what the screen shows by itself; an app in front (Kiosk Satellite, a dashboard) is left alone. In place of the home app too: also over the app chosen as Home above (or Kiosk Satellite), which comes back when the music stops; other apps are left alone. A request, a call or a ringing timer bring the face as always, and the music page comes back when they are over. It stays until the music stops: a pause keeps it, and so does the gap between two tracks. It goes by itself only if it still shows the Playing tab: browse the library or search on it and it stays, as if opened by hand (Home in the drawer brings the home app back). Pull down the drawer and choose Face or Home, or tap the face button on the music page, and the music page stays away until the music has stopped; a face chosen that way stays as it always has, until Home in the drawer brings the home app back. Off by default.' },
   light_band: { help: 'The Echo Show has no light ring: it shows the ring\'s lights as a band along the bottom of the screen, as Alexa did. That is listening, thinking, mic off, calls, volume, timers and Home Assistant\'s "Light ring". This many pixels at the bottom are kept for it, so an app on the screen never has the band over it. 0 gives the whole screen to the apps and shows no band. Default 10, stock\'s line.' },
+  round_clock: { help: 'The Echo Spot\'s round screen shows the time, large in the middle, and the date under it, white on black, with the light ring round the rim over them; the screen stays on while it does, as the Spot\'s own clock face did. 24h, or 12h with AM and PM. Off leaves the screen dark and lets it sleep five minutes after the last light. The time and its zone come from Home Assistant.' },
   bluetooth_announcements: { help: 'Says "Connected to …" and "Disconnected from …" when a phone connects, in your voice assistant\'s voice, after the chime. Home Assistant speaks the words, and only once "Allow the device to perform Home Assistant actions" is ticked in this Echo\'s ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure); without it there is the chime only.' },
   bluetooth_announcement_language: { help: 'The language of those sentences. Home Assistant does not tell the Echo which language your voice assistant speaks, so pick the one that matches its voice.' },
   sendspin_unpaired: { help: 'Lets any Music Assistant server on the network play here without pairing. Off: only a server given this Echo\'s "Sendspin pairing token" (a diagnostic entity in Home Assistant) may play.' },
@@ -480,7 +481,8 @@ const SUB = {
   screen_adaptive_colour: 'Colours warmer in warm light, yellow at night',
   ring_rotation: 'Where "Light ring fill" starts',
   music_on_screen: 'The big cover while music plays, in place of the face or the home app',
-  light_band: 'Pixels kept for the band along the bottom of the screen',
+  light_band: 'Pixels for the band along the bottom of the screen, or the ring around a round one',
+  round_clock: 'The time and date on the round screen, 24 h or 12 h',
   screen_text: 'What you said and the reply, in large letters on the screen',
   screen_text_seconds: 'How long the words stay after the reply; 0: until the next request',
   screen_timers: 'Running timers counted down, a ringing one in orange',

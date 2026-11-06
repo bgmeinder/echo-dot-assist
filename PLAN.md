@@ -2879,7 +2879,102 @@ Run in this order. Each step says what it proves.
       takes self-signed. fake_ha_esphome (`HASSMIC_CA_FILE` = a test CA): WAV, MP3 and a redirect over HTTPS with a
       CA-signed certificate, self-signed refused, taken with the setting off (persisted), unreachable reports failure.
       Device (biscuit, 2026-10-13, announcements over its ESPHome API): raw.githubusercontent.com MP3 with checks on
-      played; a self-signed server refused (curl 60), played with `https_verify=off`.  Open: a real HA over HTTPS.
+      played; a self-signed server refused (curl 60), played with `https_verify=off`.  A real HA over HTTPS (Let's
+      Encrypt) from the Spot, 2026-11-05: refused at first, "cannot be authenticated with given CA certificates": not a
+      missing root (rook's store has ISRG Root X1) but libcurl's own default CA file, compiled in as a Linux path,
+      /etc/ssl/certs/ca-certificates.crt, which the Echo has not, so curl 7.50.1 there checked against nothing.  Now
+      https.c, update.c and davs.c set CAPATH = /system/etc/security/cacerts (hashed by OpenSSL's old subject hash, which
+      its by_dir lookup tries) and CAINFO = cacerts.pem next to the binary (scripts/device/: ISRG Root X1 and X2, 3.3 kB,
+      shipped with every model: CAINFO must exist or OpenSSL refuses the lot); `https_ca_file`/`https_ca_path`.  The
+      announcement then played with the check on.  Correction, same day: CAPATH never worked on rook (the store's
+      files are named by the old subject hash, its OpenSSL looks up the new one; "Download from Amazon" failed
+      "HTTP 0" at api.amazon.com, DigiCert Global Root G2).  https_ca_file now writes state/cacerts.bundle.pem: every
+      PEM of the store plus cacerts.pem, rewritten only when it differs, as CAINFO; nothing set where no store is (the
+      PC: libcurl's default, never narrowed).  Certificates naming eMudhra are never taken (DISTRUSTED; none in
+      rook's 164 roots).  tests/unit/ca_bundle_test.sh (make unit-ca_bundle).
+- [x] Whisper without Amazon's model, and quieter replies to whispers (2026-11-05).  Amazon refuses whisper-static to
+      rook and checkers (403 "not allowlisted for device Type").  whisper_voice.c: 32 ms frames (hop 16), level, and the
+      peak normalised autocorrelation over 80..400 Hz of the signal low-passed at 1 kHz; floor = 10th percentile of the
+      levels, speech = 12 dB over it, voiced = peak > 0.60; whispered when < 36 % of the speech frames are voiced;
+      first 0.5 s skipped (as whisper_pryon's SKIP).  Swept on the corpus (voicing 0.45..0.65, margin 8..16 dB);
+      the C on 465 commands (30 voices, 3 whispering) at 30 and 15 dB SNR: 47/47 whispers, 3 and 1 of 418 normal
+      called whispered (en-us-m-elderly).  whisper_pryon.c falls back to it when the model does not load.
+      tests/unit/whisper_voice_test.c (synthetic vowels and breath).  The reply: core_tts_begin's kind (TTS_REPLY,
+      TTS_MEDIA, TTS_ANNOUNCE; proto_esphome's media_job is_reply), main.c whisper_gain: the reply volume turned down
+      to whispered_reply_volume % of itself along the volume curve (default 35), only for the run whose request was
+      whispered (reply_whispered, cleared at each request).  davs.c: refused artifacts (board.davs_refused for rook
+      and checkers, learned from a 403 into state/davs-refused), "refused" in the status, the page's list leaves
+      them out; the 403 said as "not offered", not "log in again".  On the Spot (2026-11-05): a normal request scored
+      304, a whispered one 710 (18 of 62 speech frames voiced); its reply "marginally quieter": with separate volumes
+      off whisper_gain took the reply level from kinds[] (a stale 40) instead of the volume (90): -12 dB, not -20.
+      Fixed (core_volume() unless vol_split); the log names the dB.  Default 25 %, by ear.
+- [x] Headphone volume (rook, 2026-11-05).  The jack is louder than the speaker at one volume (stock's XML raises
+      "HP Driver Gain Volume" 9 -> 11 on it).  board.jack_state (rook: /sys/class/switch/h2w/state); main.c jack_thread
+      on a NETLINK_KOBJECT_UEVENT socket (switch uevents, SUBSYSTEM=switch), no polling (ACCDET, the jack's input
+      device, has no EV_SW); plugged: volume = headphone_volume % (75) of the speaker's, kept in state/volume.speaker;
+      unplugged: back.  Setting headphone_volume (Sound), listed only with a jack_state.
+- [x] Bluetooth on a UART (rook, 2026-11-05).  The Spot's BCM43569 sits on /dev/ttyMT1 (bluetooth:radio 0660; the
+      kernel has no Bluetooth stack), unpatched it answers nothing useful.  bt_uart.c (board bt_dev "uart:<tty>",
+      bt_patch, bt_baud, bt_mac) does libbt-vendor's sequence: 115200 RTS/CTS, HCI_Reset, Update_Baudrate 0xFC18 to
+      3 Mbaud (a reset there proves it), Download_Minidriver 0xFC2E, the .hcd's 307 records as HCI commands (Launch_RAM
+      0xFC4E may go unanswered), 200 ms, 115200, reset, baud again, Write_BD_ADDR 0xFC01 from idme; then ble.c's H4.
+      Nothing powers the chip down when hassmic restarts (rfkill0 is root's): it answers only at 3 Mbaud, patched, so a
+      reset unanswered at 115200 is tried there and only the address is set.  Device: "controller ready,
+      <address>, ACL 15 x 251", scanning, HA lists the adapter; two restarts in a row came back.  Not tried:
+      A2DP source over it, Improv.
+- [x] Bluetooth audio from phones: the source's clock measured, not summed (2026-11-06).  A Pixel's music skipped on
+      the Echo Spot; besides the radio (below), a2dp.c's player.
+      hassmic's estimate of the phone's clock summed the buffer's error and ran away to its 1 % limit (the buffer
+      refilled past its mark after every dry-out, the low stretches ended in one): the player 1 % fast, dry every
+      10-15 s.  Now frames over 5 s windows, smoothed, windows over 1 % off left out (a Pixel's first 10 s came at
+      44334 frames/s), restarted after a pause; reads -69..+55 ppm.  a2dp_buffer_ms 300 on rook (gaps to 140 ms).
+      Logged: once per link the phone's EDR and slots, every dry-out with the last packet's age and the output's queue,
+      a 10 s receive window only when something was dropped or over 3 % short.
+      a2dp_codecs.c: board.a2dp_max_kbps leaves out codecs above it (aptX HD 576, aptX 384 kbit/s at 48 kHz: 352 at
+      44.1 kHz offered alone under a cap between the two); board.a2dp_buffer_ms the jitter buffer (150 by default).
+- [x] A Wi-Fi driver of our own build (rook, 2026-11-06).  The Spot's phone audio skipped with Wi-Fi power save off.
+      Amazon's bcmdhd.ko (1.363.110.17) is built with LAB126_DISABLE_PS: the interface registered
+      PM_BLOCK, every power-save request refused (traced: wpa_supplicant's "enabled" after DHCP reached cfg80211, the
+      chip stayed at PM 0, and was written 0 again ~20 s after a connect).  At PM 0 the chip's Wi-Fi kept the antenna
+      it shares with Bluetooth: aptX at 20-25 KB/s of 48, dry every second.  Not amazon.speech.sim's high performance
+      lock (WifiController ignores locks with the screen on).  Fixed by a Wi-Fi driver of our own build: Broadcom's
+      bcmdhd 101.10.591.95.46 (2025-02) as amazon-oss ported it to rook, built against Amazon's 3.18.19 MT8163 tree
+      (douglas, Fire HD 8 2017: the Spot's own is not public) with devices/rook/kconfig on douglas_defconfig and the
+      GCC 4.9 donut uses, our devices/rook/bcmdhd.patch (no LAB126_DISABLE_PS; CONFIG_ROOK and GET_CUSTOM_MAC_ENABLE
+      for the C code, else the regulator was NULL, an oops at load, and the MAC the chip's 00:90:4c placeholder; the
+      MAC from /proc/idme/mac_addr as Amazon's; no WPA3 SAE, cfg80211's external auth being 4.17+; no build time or
+      folder in it: reproducible).  The config: kallsyms of the Spot against a douglas build, then
+      tools/kabi_compare.py, which compares the struct offsets ~1400 kernel functions use in our vmlinux and the
+      Spot's Image: douglas had WIRELESS_EXT (its MediaTek combo Wi-Fi selects it), 16 bytes more in net_device; with
+      the combo off and MTK_USBFSH on, net_device, sk_buff, urb, usb_device, wiphy all at the Spot's offsets.  struct
+      module's init/exit at the stock module's (0x128, 0x1f8), every one of its 237 imports exported.  Fire OS's
+      Wi-Fi HAL insmods /system/lib/modules/bcmdhd.ko at Wi-Fi on: sysinstall.sh puts ours there (device.conf
+      WIFI_DRIVER), stock's as .pre-hassmic.  make kernel-tools fetches tree, compiler and driver by commit
+      (kernel-tools.sh: a .git URL is a repository and a commit); two builds byte-identical.  Cold boot: loaded at
+      16 s, the Spot's MAC, PM 2 kept by the driver.
+- [x] Echo Spot: phone audio needs the Wi-Fi on 5 GHz (2026-11-06). With the clock fix and our Wi-Fi driver (above) the
+      audio came whole (receive counters: nothing dropped in ble.c's H4 framing or the L2CAP reassembly) but short:
+      44.2-48.8k frames/s of 48k in 10 s windows, the phone not getting it across beside Wi-Fi (both sides EDR 2/3
+      Mbit/s and 5-slot; Broadcom's Set_ACL_Priority 0xFC57 high while streaming, as bluedroid does, taken, little
+      change; no Wi-Fi scans then; CPU hotplug off, no change; btc_mode 1-5 all ~44-50 KB/s). With the Spot's Wi-Fi on 5
+      GHz (channel 100): 47923-48038 frames/s, gaps <= 42 ms, 0 dry-outs a minute for aptX and for aptX HD (576 kbit/s;
+      Fire OS's output is pcm16, so HD's 24 bits end there).
+- [x] Now playing on the Spot's screen (2026-11-05/06).  Upstream's metadata@v1 and artwork@v1 (sendspin.c, for the
+      Echo Shows' screen.c) feed the round screen as well: shows_music() = screen_present() || ring_shows_music() asks
+      for the roles, show_meta/show_progress/show_art/show_gone hand what plays to screen.h and to ring_band.c's
+      ring_music_* (round screens only; the controller and Music Assistant's pages stay screen.c's).  The cover comes
+      as artwork@v1's 400 x 400 JPEG, up to 2 MB, into the renderer's message 3 (an image: BitmapFactory.decodeByteArray,
+      drawn as a square of b px at top a, centred, through a FILTER_BITMAP paint); layout 288 px from the top at 29,
+      title (24 chars) and artist (26) under it; in place of the clock while playing, the clock back when it stops;
+      userActivity each minute meanwhile.  Seen on the Spot with an audiobook cover.
+- [x] The Spot's wake sound (2026-11-05).  SpeechInteractionManager's resources are shrunk; its resources.arsc names
+      system_state_active_start = res/BX.wav (48 kHz mono, 0.65 s, stored), the listening tone, and
+      system_state_user_speech_confirmed = res/AJ.wav; ban_ui_wakesound/ban_ui_endpointing are 0-byte placeholders.
+      board.c maps ui_wakesound and ui_wakesound_touch to BX.wav.  The Drop In blueprint's model list has echo-spot.
+      Full run, 2026-11-05: every model builds with STUBS=1, make unit passes, tests/run.py 34 of 35 (the build
+      image now has nodejs, iproute2, netcat); esphome's "wake word sent ahead of the live stream" (24000 bytes)
+      gives 22400 in this container 5 of 6 times on HEAD too: timing on the build host, not today's changes.  update needs a
+      git version (BUILD from git describe): passes with VERSION/BUILD given.
 - [x] Frozen at the first wake word after 18.6 h (2026-10-13, GitHub issue #31; Echo Dot 3 on 2026.10.12.210015, up
       ~24 h): wake word, wake sound, listening ring, then nothing; buttons dead (action logged, not acted on), no
       pipeline timeout, power cycle needed. HA ran a whole pipeline meanwhile. The log's last hassmic lines: `whisper:
@@ -3563,6 +3658,107 @@ Run in this order. Each step says what it proves.
       the rest of this round (the drawer over an app, the screenshot's orientation, a fling with a real finger, image decoding
       off the UI thread, goToSleep/wakeUp, a real MA token).
       Open items, one list: docs/re-checkers.md "What a port needs".
+- [~] Echo Spot 1st gen (`rook`, 2026-11-04). crown's SoC (MT8163) on Fire OS 5.5.6.9 (690918120, LVY48F): Android 5.1.1
+      (API 22), kernel 3.18.19, Broadcom CYW43569 (Wi-Fi bcmdhd, Bluetooth on a UART: off), 4 mics, round 480 x 480 screen,
+      the front end in the audio HAL (OpenSL ES), `libpryon.so` 2.41 with the old decoder API (every symbol hassmic needs).
+      Unlocked with amonet-rook-v2.0.0 (fastbrick.bat from Windows), rooted.  Found: the XDA boot-root leaves adb off on
+      this firmware (stock `init.fosflags.sh` + `adb_cd.sh` strip adb from `persist.sys.usb.config` on a release-keys
+      build; `ro.build.tags=test-keys` in default.prop cures it, `mkbootroot.py --prop`); Android 5.1's init reads no
+      `/system/etc/init/` (`hassmic.rc` into the ramdisk: `--add`, `--import`); bionic 22 lacks getifaddrs and
+      open_memstream (`src/hassmic/compat22.c`); Fire OS 5's toolbox lacks tr, sed, head, tail, pidof, pkill, timeout...
+      (a static toybox, `tools/mktoybox.sh`, first on the scripts' PATH); `settings` has no screen rows (Amazon's own
+      store); `service call` has no i64; no `libacehal_dha.so`; donut's magiskpolicy32 runs nowhere (the 5.1 linker wants
+      DT_HASH, TWRP is 64-bit): Magisk v31.1's arm64 magiskpolicy under qemu-aarch64 with TWRP's bionic
+      (`tools/twrp_bionic.py`, device.conf `SEPOLICY_RUNTIME`); the stock update zip flashes lk/tz/preloader (never whole
+      in TWRP).  Buttons: volume on `keys`, mute = KEY_POWER on `mtk-kpd`, flipping the keypad driver's `privacy_state`
+      (read once a second).  Installed on one Spot (boot image from the stock boot.img; `install-boot.sh --files-only`
+      from Git Bash): the satellite from init, home app in front, firewall rule by rule (no iptables-restore).
+      Built in a container on a remote Docker engine (`tools/devenv/`): the NDK, qemu, uv; sources in as a tar.
+      2026-11-05: adopted by Home Assistant (by IP), wake word, pipeline, reply; HTTPS media checked against the
+      firmware's store plus hassmic's cacerts.pem (the "Media over HTTPS" entry says what was wrong: libcurl's built-in
+      CA path, not a missing root).  The speaker, silent for a day with every stage of the path confirmed in
+      registers (codec, MFP, amp GPIO 122, mixer, DL1 running): the media server init starts at boot never carries
+      hassmic's playback to the primary output (dumpsys media.audio_flinger during an announcement: standby, 0 tracks,
+      0 writes), one started afresh does, the mic with it.  main.sh kills it at satellite start before hassmic starts
+      (device.conf MEDIA_RESTART): heard from a cold boot on the firmware's own kernel.  Why the boot-time one is so is
+      not known (the only state that differs is what Amazon's speech service attaches to the output at boot).  Traps on
+      the way: mediaserver holds /dev/snd/pcmC0D23p once anything played through it, so a later `tinyplay` blocks in
+      snd_pcm_open and passes for silence; the codec driver's aic32x4_apply_mute at every stream start re-applies the
+      MFP mute state (hassmic's unmute pulse at open lands 25 ms before the start, in time); HA's volume for a new Echo
+      is 20 %; a kernel comparison made with the boot-time media server compares nothing (R0rt1z2's XDA kernel was
+      blamed for an afternoon: same source g004652e, his build of 2025-11-24 against Amazon's of 2026-10-21; a
+      `mkbootroot.py --kernel` was added and removed again).  At 100 % the codec is at stock's own speaker settings
+      (audio_device.xml); the amplifier's Ext_Amp_Gain (6 of 6..24 dB) is the headroom above stock.  A boot of the XDA
+      image writes persist.sys.usb.config without adb into /data/property/, which outlives it (fixed from TWRP).  The
+      clock landed on 1970: Fire OS 5's toolbox `date` reads `@<epoch>` as 0 and clock_set checked one way only
+      (toybox's `date` first on PATH, the check both ways now).  The screen: it is on all along (the wake
+      call with i64 fails on 5.1's service tool, two i32 now), but a band along the bottom of a round screen is a
+      sliver under the bezel: ringbar.dex's ring mode (argv "ring", board.screen_round) draws a clear layer over the
+      whole screen and lays the band's strip around the rim by a table hassmic sends once (ring_band.c send_table:
+      the annulus of light_band px, the strip 2 pi (R - rows/2) long, its middle at the bottom); verified by
+      screenshot (a rainbow ring, 2026-11-05).  ART's verifier wants a check-cast on a Method taken out of an
+      Object[] (the PC's dexrun does not).  The page (web/ring.js): `round` in the ring status (ringdesign.c, from
+      board.screen_round); the clock (setting round_clock, 2026-11-05): the renderer's ring mode takes messages
+      (5 ints: kind, a, b, c, n, then n bytes): a strip frame, the text cleared, or text drawn centred at baseline a,
+      size b, colour c into a Bitmap by the framework's Canvas and Paint (reflection; Roboto), the layer then that
+      bitmap's pixels with the last strip laid on again; ring_band.c clock_tick sends the time (h*0.30 px, 12 h
+      h*0.21: "12:45 PM" is the widest) and date (h*0.075) once a minute, on a fresh renderer and on a mode change,
+      a userActivity each minute meanwhile (5.1's settings tool writes no screen_off_timeout: Amazon's rows are
+      elsewhere); the layer wiped before every draw (Canvas.drawColor(0, CLEAR): SurfaceFlinger hands the buffers
+      round and a layer with alpha blends over the frame of two or three draws ago, two minute digits at once);
+      ART's verifier again: a Method out of an Object[] needs its check-cast.  main.sh's media server restart waits
+      for media.audio_flinger to be registered: hassmic started 0.2 s after the new pid crashed in a binder thread.
+      The SELinux rule for the clock-sync property (su -> default_prop property_service set, property_socket, init's
+      socket) is in sepolicy.rules; roundMap (the same mapping as send_table, held to it pixel for pixel by band_map_test.py,
+      which now also builds send_table's table), roundImage for tiles and the designer's stage, roundCellAt for
+      painting, conic thumbnails; the designer's switch reads "Screen" on a round Echo.  The build image has nodejs
+      now (band_map_test, the other page tests, in the container).
+      Analog clock faces (2026-11-06, setting clock_face): the firmware's com.amazon.selector.clock.resources.apk
+      (67 MB; sysinstall moves it to /system/hassmic-removed with the other Alexa apps, clockface.c reads it there as
+      sounds.c does) holds Amazon's faces as deflated JSON under assets/raw: clock_template_<id> (face and background
+      ids, the default of each), clock_face_<id> (is_analog; ImageLayer, RotatingHandLayer HOUR_12/HOUR_24/MINUTE/SECOND,
+      MaskedRotatingHandLayer, DateWindowLayer, complications, TextClockLayer; day_/night_ src and colour, center_x/y
+      on a 480 face) and clock_background_<id>; the art is the package's drawables (PNGs and binary-XML layer-lists),
+      thumbnails res/drawable/img_list_clockface_<id>.png.  27 templates with an analog face, 328 parts, every
+      drawable present; 22 offered: photos and wallpaper_{art,nature,seasonal,travel} name a photo_provider (ZORDON,
+      CURATIONS_*), backgrounds from Amazon's services, left out.  clockface.c (zip central directory, inflate; tests/unit/clockface_test.py on a package of its
+      own) turns template + time into parts; ringbar.dex's ring mode draws them by name through Resources over its own
+      AssetManager (kinds 7 path, 8 package, 6 cleared, 4 a part rotated about the centre / tinted SRC_IN / centred at
+      its intrinsic size or filling, 5 shown; tests/unit/ringbar_run.py), so layer-lists and densities are Android's own.
+      ring_band.c draws once a second (the wait ends just past the next second), night by the light sensor (under 3
+      lux, back over 10; 21:00-07:00 where there is none).  rook's light sensor: a TI OPT3001 on I2C 0-0044 (driver
+      opt300x, MediaTek's "alsps"), lux as text in /sys/bus/i2c/devices/0-0044/iio:device0/in_illuminance_input,
+      world-readable: board.light_sensor; HA's Illuminance read 0.22 lx in a dark room, as the file (2026-11-06).
+      Recorded once a second for two minutes with the room's lights off and on: 0.55-0.57 lit, 0 dark (the dark glass:
+      some 1/100 of the light), so board.lux_dark (0.1 on rook, light again at 3 times it; 3 lux where 0) sets the
+      faces' night; Beach's day version came up with the lights on (screenshot).  The backlight: device.conf had
+      Android's brightness manual at 120 of 255 (half in a dark room, #126's complaint on the Show 5); Android's auto
+      mode on the same sensor (screen_brightness_mode=1) follows within 3 s: 38 lit, 1 dark, which looked right at
+      night by the owner's eye.  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (23 options)
+      switches within a second; screenshots of Abstract shapes and Beach at night, Beach by day (2026-11-06).  Not yet:
+      a template's other faces and backgrounds (clockface_styles/colors exist, no setting); the settings page's
+      picker seen in a browser.
+      To do: rook's lux in true lux.  The OPT3001 behind the dark glass reads some 1/100-1/1000 of the room's light,
+      so HA's Illuminance is not comparable with other sensors.  A scale factor (a board field multiplying what
+      core_lux reads, lux_dark then on the true scale) from one reading beside a reference (a phone's light meter on
+      the Spot's top, or a sensor in the same room) with the lights on.
+      adb over Wi-Fi (2026-11-06): never listened on rook.  The gate worked (boot.log "adb over Wi-Fi OPEN", the
+      property 5555, adbd restarted, 5555 refused rather than dropped from the PC), but the restarted adbd held only
+      127.0.0.1:5037; its trace (persist.adb.trace_mask) went from usb_init straight to jdwp, no local_init, and its
+      banner had no ro.product.*.  The XDA adbd is static with Android 7's bionic: libselinux's selinux_android_setcon
+      (0x2ab08, called for --root_seclabel) runs __system_properties_init again, which re-checks each context's
+      access as /dev/__properties__/<name>; on 5.1 that is one file, the legacy area fails the check and is unmapped
+      (adbd's maps: gone, fd 8 still open), so everything read after the switch is empty (the trace mask and
+      ro.secure are read before it).  The raw area and a trie walk on the PC read 5555 fine.  Fix: device.conf
+      ADBD_PATCH, mkbootroot.py --adbd-patch (old bytes checked): setcon's tail call into the init becomes "return
+      0", 8 bytes; the image built from it differs from the installed one in those bytes of sbin/adbd only.  Not
+      `--root_seclabel` dropped: adbd's shells would go to the enforcing shell domain.  crown, checkers, cronos ship
+      the same adbd unpatched: their property area is a directory.  On one Spot (2026-11-06, written with dd from root
+      adb, rebooted): `adb devices -l` with product:rook model:AEORK; adb-wifi.sh opened it, `adb connect` a root shell
+      in u:r:su:s0 over Wi-Fi; the window ended early (hassmic.adb.until 0): port 0, no listener, connect dropped.
+      (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
+      does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
+      HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.
 - [~] Echo Show 8 1st gen (`crown`, 2026-10-13; `docs/re-crown.md`). Same platform as checkers: MT8163, Android 7.1.2,
       kernel 4.9.77, RT5616, gating latch, MT7668; Fire OS 6.5.7.0 NS6570 (6074). `libpryon.so` 2.41 (newer than the
       Show 5's; `pryon_test` loads the ALEXA model), `libasp.so` differs, `libopus`/`libz` as donut's. `devices/crown/`

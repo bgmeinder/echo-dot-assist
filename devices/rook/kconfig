@@ -1,0 +1,15 @@
+# On Amazon's douglas_defconfig (Fire HD 8 2017, the same MT8163 and 3.18.19 tree, Fire OS 5.3.7.3): what the Echo Spot's
+# kernel has otherwise (its boot.img carries no IKCONFIG).  Found from its /proc/kallsyms against a douglas build and
+# checked by tools/kabi_compare.py: the structures a Wi-Fi driver uses (net_device, sk_buff, urb, usb_device, wiphy)
+# at the Spot kernel's offsets (2026-11-06).  MediaTek's combo connectivity (Wi-Fi, BT, GPS, FM on the SoC) is not in
+# the Spot, and its Wi-Fi selected WIRELESS_EXT, two pointers in net_device the Spot's kernel lacks; the Spot's Wi-Fi is
+# Broadcom's on MediaTek's USB 1.1 host (musbfsh)
+# CONFIG_MTK_COMBO is not set
+# CONFIG_MTK_COMBO_WIFI is not set
+# CONFIG_MTK_COMBO_BT is not set
+# CONFIG_MTK_BTIF is not set
+# CONFIG_MTK_GPS is not set
+# CONFIG_MTK_BTCVSD is not set
+# CONFIG_MTK_CONN_LTE_IDC_SUPPORT is not set
+CONFIG_MTK_USBFSH=y
+CONFIG_MTK_USB_RESET_WIFI_DONGLE=y
