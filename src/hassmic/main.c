@@ -50,6 +50,7 @@
 #include "ring.h"
 #include "ringlive.h"
 #include "musiclight.h"
+#include "clockface.h"
 #include "ringdesign.h"
 #include "ledq.h"
 #include "screen.h"
@@ -3908,7 +3909,7 @@ static float lux_tsl2540(const char *dir)
 
 /* The light sensor as stock's HAL (libacehal_ambientLightSensor.so, its per-model "facade") reads it: a sysfs file the
  * kernel driver fills with calibrated lux, parsed with atof.  0..400 is all stock uses of it. */
-float core_lux(void)
+static float lux_read(void)
 {
     const char *e = getenv("HASSMIC_LUX");         /* tests */
     const char *const *p = e ? (const char *const[]){ e, NULL } : board.light_sensor;
@@ -3924,6 +3925,50 @@ float core_lux(void)
         return (float)atof(buf);
     }
     return NAN;
+}
+
+/* What core_lux() hands out where a read blocks (board.lux_poll): the last reading, taken once a second by a thread of
+ * its own; elsewhere the sensor is read at each call, as it always was.  A read is not a file read on every model:
+ * the Spot's OPT3001 driver (opt300x) starts a conversion for each read of in_illuminance_input and
+ * sleeps until it is done, ~800 ms, one reader at a time.  Callers under core_lock (settings_available's check, the
+ * states a new subscriber gets) then held it for seconds, and the capture with it: 2.4-5.3 s of the mic lost at each
+ * clock face picked in Home Assistant, whose select waited as long (an Echo Spot, 2026-11-06: three threads in
+ * opt3001_read_raw at once, sampled).  The first call reads itself (the start: no reading yet) and starts the thread;
+ * 1 Hz is stock's rate and what proto_esphome's light_thread polls at.  The value as float bits in an atomic. */
+static atomic_uint lux_bits;
+static atomic_int lux_started;
+
+static void *lux_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        sleep(1);
+        float l = lux_read(); unsigned u; memcpy(&u, &l, sizeof u);
+        atomic_store(&lux_bits, u);
+    }
+    return NULL;
+}
+
+float core_lux(void)
+{
+    static pthread_mutex_t first = PTHREAD_MUTEX_INITIALIZER;
+    if (!board.lux_poll) return lux_read();
+    if (!atomic_load(&lux_started)) {
+        pthread_mutex_lock(&first);
+        if (!atomic_load(&lux_started)) {
+            float l = lux_read(); unsigned u; memcpy(&u, &l, sizeof u);
+            atomic_store(&lux_bits, u);
+            pthread_t t;
+            /* polled wherever the board names a sensor, a first read that failed too (a driver not up yet at boot);
+             * none named: NAN for good, nothing polled */
+            if ((getenv("HASSMIC_LUX") || board.light_sensor[0])
+                && !pthread_create(&t, NULL, lux_thread, NULL)) pthread_detach(t);
+            atomic_store(&lux_started, 1);
+        }
+        pthread_mutex_unlock(&first);
+    }
+    unsigned u = atomic_load(&lux_bits); float l; memcpy(&l, &u, sizeof l);
+    return l;
 }
 
 /* Auto brightness is stock's engine (ledcontroller, above), which only the LED ring has: the Echo Show's band
@@ -4448,6 +4493,12 @@ int main(int argc, char **argv)
                                                      * default 10 px came up first, and with "Light band" 0 the apps were
                                                      * laid out twice */
       if (!settings_peek("light_band", rows, sizeof rows)) ring_band_rows(atoi(rows)); }
+    { char v[64]; int n;                            /* the round screen's clock as well, the face before the mode: the
+                                                     * wake word models load between here and settings_load, and the
+                                                     * Spot showed the digital clock for 2 s at boot before its face */
+      const char *const *faces = clockface_names(&n);
+      if (!settings_peek("clock_face", v, sizeof v)) for (int i = 0; i < n; i++) if (!strcmp(v, faces[i])) ring_band_face(i);
+      if (!settings_peek("round_clock", v, sizeof v)) ring_band_clock(!strcmp(v, "24h") ? 1 : !strcmp(v, "12h") ? 2 : 0); }
     ring_start(led_run, ring_reloaded);
     ringlive_start(live_hold, live_level, live_changed);     /* where root gave hassmic the ring's frame (main.sh) */
     term_start();                       /* (after ringlive_start: its SIGTERM handler is the one before ours) */
@@ -4555,6 +4606,7 @@ int main(int argc, char **argv)
     pthread_mutex_lock(&core_lock); core_timer_sound_default(); settings_load(); settings_preset(); pthread_mutex_unlock(&core_lock);    /* whatever the protocol */
     pthread_mutex_lock(&core_lock); core_volume(); tell_plugins(); pthread_mutex_unlock(&core_lock);      /* what plugins are told at their READY (plugin.c) */
     ringlive_begin();                   /* the mute and the Echo's own patterns known: what the last run left lit, dark */
+    ring_band_screen_ready();                       /* the screen's backlight and night as set, never the defaults first */
     davs_start();                                             /* Amazon login for artifact downloads (settings page) */
     static const struct web_hooks web_hooks = { web_attention, web_approved };
     if (core_web_port && web_start(core_web_port, &web_hooks)) { fprintf(stderr, "web: not available\n"); core_web_port = 0; }

@@ -1074,6 +1074,18 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   no /system/etc/init), and Magisk's arm64 `magiskpolicy` for the SELinux patch. What 5.1's C library
   lacks (`getifaddrs`, `if_nameindex`, `open_memstream`) hassmic brings along for such a build; nothing changes on the
   other models.
+- **Echo Spot: its own analog clock faces.** "Clock face" (Lights, with a picture of each; a select in Home
+  Assistant) puts one of the Spot's 22 analog faces from Alexa's clock in place of the digital clock, read from the
+  Spot's own firmware: nothing is downloaded or copied, and Alexa stays off (the designs whose pictures came from
+  Amazon's online photos are left out). "Clock dial" and "Clock background" pick among the face's own (up to four dials,
+  three to ten backgrounds a design), "Date on the clock face" puts the day of the month in its date window.
+- **Echo Spot: its light sensor, screen brightness and night mode, as stock's settings had them.** "Light sensor"
+  (Features) works on the Spot: an Illuminance sensor in Home Assistant, reading far under the room's real light from
+  behind the dark glass (about half a lux in a lit room). The screen's brightness uses the Echo Shows' three settings:
+  "Adaptive brightness" follows the room on Amazon's own curve for the Spot, "Adaptive brightness adjustment" makes it
+  brighter or dimmer than that, "Screen brightness" is the level with adaptive off. "Night mode" (Automatic: a dark
+  room; Scheduled: the hours you set; Off) decides when it is night: the faces show their night version and the screen
+  dims, or with "Night clock" off it goes dark and lights up only while the Echo shows something.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

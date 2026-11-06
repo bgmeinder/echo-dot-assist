@@ -50,8 +50,23 @@ struct board {
     const char *light_sensor[3];    /* files the stock light sensor HAL reads lux from, first that opens; {NULL}: none.  "tcs3400:<dir>": raw channels of
                                        a TCS3400 under <dir>/input*, main.c lux_tcs3400.  "tsl2540:<i2c dir>": a TSL2540's
                                        iio:device* there, calibrated from idme, main.c lux_tsl2540 */
+    /* lux under which the room counts as dark (the clock faces' night version, ring_band.c), back to light at 3 times it;
+     * 0: 3 lux.  A sensor behind dark glass reads far under the room's true light (the Spot: 0.56 in a lit room) */
+    float lux_dark;
+    /* 1: a read of light_sensor blocks (rook's OPT3001 driver converts for each read, ~800 ms, one reader at a time), so
+     * a thread of its own reads it once a second and core_lux() hands out the last reading; 0: read when asked, as ever */
+    int lux_poll;
     int screen_round;               /* 1: a round screen (rook): ring_band.c draws the light ring as a ring at the rim,
                                        light_band = its thickness, instead of a band along the bottom (ringbar's ring mode) */
+    /* the firmware's own clock-face package (clockface.c: Amazon's analog faces, read where it lies) and its package
+     * name (the renderer's Resources look its drawables up by it); NULL: none */
+    const char *clock_faces, *clock_faces_pkg;
+    /* the screen's adaptive brightness as the firmware's Android computes it (ring_band.c, which then sets the backlight
+     * itself: Android's own mode is left manual): its curve, config_autoBrightnessLevels (lux) and ..LcdBacklightValues
+     * (0..255, one more: level[0] at 0 lux) of framework-res, a monotone cubic spline through (0, level[0]), (lux[i],
+     * level[i + 1]); lux in the units of Android's light sensor, which reads lux_scale times light_sensor's file; and the
+     * slider's gamma range (mScreenAutoBrightnessAdjustmentMaxGamma in dumpsys display).  NULL: no screen brightness */
+    const struct board_backlight { float lux_scale, max_gamma; int n; int lux[12], level[13]; } *backlight_curve;
     int volume_steps;               /* volume_step-NN animations of ledcontroller */
     /* LEDs the light really shows, where that is fewer than stock's animations draw (12): 1 = one RGB LED that shows the
      * first of each frame (the Echo Input's LP5562): nothing turned towards the talker, no LED's own layer (ring.c).

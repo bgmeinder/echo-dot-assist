@@ -89,6 +89,7 @@
 #include "ringlive.h"
 #include "screen.h"
 #include "board.h"
+#include "clockface.h"
 #include "core.h"
 #include "micgain.h"
 #include "hash.h"
@@ -166,7 +167,11 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        /* the light ring live (ringlive.h): four actions, the design select, then a light per LED (RING_LEDS_MAX keys:
         * a new key goes after KEY_LIVE_LED + RING_LEDS_MAX) */
        KEY_LIVE_FRAME, KEY_LIVE_ANIM, KEY_LIVE_DESIGN_SVC, KEY_LIVE_STOP, KEY_LIVE_DESIGN, KEY_LIVE_LED,
-       KEY_PLUGIN = KEY_LIVE_LED + RING_LEDS_MAX, KEY_MWW_DEPRECATED };
+       KEY_PLUGIN = KEY_LIVE_LED + RING_LEDS_MAX, KEY_MWW_DEPRECATED,
+       /* the round screen (rook): its clock face, the face's dial, background and date window, then its night (screen_setting);
+        * its backlight is KEY_SCR_* above */
+       KEY_CLOCK_FACE, KEY_CLOCK_DIAL, KEY_CLOCK_BG, KEY_CLOCK_DATE,
+       KEY_NIGHT_MODE, KEY_NIGHT_FROM, KEY_NIGHT_TO, KEY_NIGHT_CLOCK };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_PAUSED = 3, MP_CMD_PLAY = 0, MP_CMD_PAUSE = 1, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 /* A music plugin is listed (plugin.h plugin_has_music, docs/plugins.md 4.7): the media player offers pause and play
  * besides, for what the plugin plays; without one the features stay what they were */
@@ -407,6 +412,39 @@ static void timer_end_text(char *out, size_t cap, long long left_ms)    /* lock 
 }
 
 static int listed(int key);
+/* A choice as people read it, for a select's options: "abstract_shapes" -> "Abstract shapes"; at most cap - 1
+ * characters */
+static void part_label(const char *name, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", name ? name : "");
+    for (char *c = out; *c; c++) if (*c == '_') *c = ' ';
+    out[0] = (char)toupper((unsigned char)out[0]);
+}
+/* The clock face's select: the setting's choices (clockface_names: "digital", then template ids) */
+static void face_label(int i, char *out, size_t cap)
+{
+    int n; const char *const *names = clockface_names(&n);
+    part_label(i >= 0 && i < n ? names[i] : "", out, cap);
+}
+
+/* the face's dials or backgrounds (dial: clockface_dial_names, else _background_names) the same way: "botanical_white" ->
+ * "Botanical white"; n 0 on the digital clock */
+static const char *const *face_parts(int dial, int *n)
+{
+    int f = ring_band_face(-1); *n = 0;
+    if (f <= 0) return NULL;
+    return dial ? clockface_dial_names(f - 1, n) : clockface_background_names(f - 1, n);
+}
+
+/* The round screen's night (ring_band.c): settings of settings.c's table, each an entity named as there,
+ * key order = the table's (KEY_NIGHT_MODE..KEY_NIGHT_CLOCK): a switch (night_clock) or a select, its options its choices, the night mode's
+ * capitalised ("Automatic"), the times as they are ("22:00") */
+static const char *const screen_names[] = { "night_mode", "night_from", "night_to", "night_clock" };
+static const struct setting *screen_setting(int key)
+{
+    return key >= KEY_NIGHT_MODE && key <= KEY_NIGHT_CLOCK ? settings_find(screen_names[key - KEY_NIGHT_MODE]) : NULL;
+}
+
 static void send_setting(int key)       /* lock held */
 {
     if (!listed(key)) return;
@@ -421,6 +459,22 @@ static void send_setting(int key)       /* lock held */
     case KEY_DND:   pb_uint(&b, 2, core_dnd(-1)); send_state(SWITCH_STATE, &b); break;
     case KEY_DENOISE: pb_str(&b, 2, denoise_names[core_mic_denoise(-1)]); send_state(SELECT_STATE, &b); break;
     case KEY_BT_LANG: if (ble_present()) { pb_str(&b, 2, settings_bt_lang()->name); send_state(SELECT_STATE, &b); } break;
+    case KEY_CLOCK_FACE: { char l[40]; face_label(ring_band_face(-1), l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); break; }
+    case KEY_CLOCK_DIAL: case KEY_CLOCK_BG: {
+        int n, dial = key == KEY_CLOCK_DIAL, v = dial ? ring_band_dial(-2) : ring_band_background(-2);
+        const char *const *p = face_parts(dial, &n); char l[64];
+        if (v < 0 || v >= n) break;
+        part_label(p[v], l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); break;
+    }
+    case KEY_CLOCK_DATE: pb_uint(&b, 2, ring_band_date(-1)); send_state(SWITCH_STATE, &b); break;
+    case KEY_NIGHT_MODE: case KEY_NIGHT_FROM: case KEY_NIGHT_TO: case KEY_NIGHT_CLOCK: {
+        const struct setting *st = screen_setting(key);
+        int v = settings_get(st);
+        if (st->type == S_BOOL) { pb_uint(&b, 2, v != 0); send_state(SWITCH_STATE, &b); }
+        else { const char *const *c; int n = settings_choices(st, &c); char l[24];
+               if (v >= 0 && v < n) { part_label(c[v], l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); } }
+        break;
+    }
     case KEY_EQ_BASS: case KEY_EQ_MID: case KEY_EQ_TREBLE: pb_float(&b, 2, core_eq(key - KEY_EQ_BASS)); send_state(NUMBER_STATE, &b); break;
     case KEY_ARB_JOIN: if (arb_running()) { pb_uint(&b, 2, arb_arbitrate(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_ARB_PEERS: if (arb_running()) { pb_float(&b, 2, arb_peers()); send_state(SENSOR_STATE, &b); } break;
@@ -578,6 +632,8 @@ static void send_light_states(void)     /* lock held */
     for (int i = 0; i < RING_LEDS_MAX; i++) send_setting(KEY_LIVE_LED + i);
     send_setting(KEY_LIVE_DESIGN);
     send_setting(KEY_SCR_AUTO); send_setting(KEY_SCR_LEVEL); send_setting(KEY_SCR_ADJUST);
+    send_setting(KEY_CLOCK_FACE); send_setting(KEY_CLOCK_DIAL); send_setting(KEY_CLOCK_BG); send_setting(KEY_CLOCK_DATE);
+    for (int k = KEY_NIGHT_MODE; k <= KEY_NIGHT_CLOCK; k++) send_setting(k);
 }
 
 static void send_light_entities(void)
@@ -635,6 +691,38 @@ static void send_light_entities(void)
         for (int i = 0; i < n; i++) if (strcmp(names[i], "None")) pb_str(&b, 6, names[i]);
         send_msg(LIST_SELECT, &b);
     }
+    /* the round screen's clock: hassmic's digital one or one of the firmware's analog faces (ring_band.c) */
+    if (listed(KEY_CLOCK_FACE)) { PB(b, 1536); char l[40]; int n; clockface_names(&n);
+      pb_str(&b, 1, "clock_face"); pb_fixed32(&b, 2, KEY_CLOCK_FACE); pb_str(&b, 3, "Clock face"); pb_str(&b, 5, "mdi:clock-outline");
+      for (int i = 0; i < n && b.n < 1536 - 48; i++) { face_label(i, l, sizeof l); pb_str(&b, 6, l); }
+      pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
+    /* that face's own dials and backgrounds (listed only for an analog face: their options are the face's, so a new face
+     * lists them again, settings.c) and its date window */
+    for (int dial = 1; dial >= 0; dial--) {
+        int key = dial ? KEY_CLOCK_DIAL : KEY_CLOCK_BG, n; const char *const *p = face_parts(dial, &n); char l[64];
+        if (!listed(key)) continue;
+        PB(b, 1024);
+        pb_str(&b, 1, dial ? "clock_dial" : "clock_background"); pb_fixed32(&b, 2, key);
+        pb_str(&b, 3, dial ? "Clock dial" : "Clock background"); pb_str(&b, 5, dial ? "mdi:clock-time-four-outline" : "mdi:image-outline");
+        for (int i = 0; i < n && b.n < 1024 - 72; i++) { part_label(p[i], l, sizeof l); pb_str(&b, 6, l); }
+        pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b);
+    }
+    if (listed(KEY_CLOCK_DATE)) { PB(b, 160); pb_str(&b, 1, "clock_date"); pb_fixed32(&b, 2, KEY_CLOCK_DATE);
+      pb_str(&b, 3, "Date on the clock face"); pb_str(&b, 5, "mdi:calendar-today"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+    /* the round screen's night (ring_band.c), as stock's Night Mode settings (its backlight: KEY_SCR_* above) */
+    static const char *const screen_icons[] = { "mdi:weather-night", "mdi:clock-start", "mdi:clock-end", "mdi:clock-outline" };
+    for (int k = KEY_NIGHT_MODE; k <= KEY_NIGHT_CLOCK; k++) {
+        const struct setting *st = screen_setting(k);
+        if (!listed(k)) continue;
+        PB(b, 1024);
+        pb_str(&b, 1, st->name); pb_fixed32(&b, 2, k); pb_str(&b, 3, st->label); pb_str(&b, 5, screen_icons[k - KEY_NIGHT_MODE]);
+        if (st->type == S_BOOL) { pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
+        else {
+            const char *const *c; int n = settings_choices(st, &c); char l[24];
+            for (int i = 0; i < n; i++) { part_label(c[i], l, sizeof l); pb_str(&b, 6, l); }
+            pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b);
+        }
+    }
     if (listed(KEY_LUX)) { PB(b, 192); pb_str(&b, 1, "illuminance"); pb_fixed32(&b, 2, KEY_LUX); pb_str(&b, 3, "Illuminance"); pb_str(&b, 6, "lx");
           pb_uint(&b, 7, 0); pb_str(&b, 9, "illuminance"); pb_uint(&b, 10, 1); send_msg(LIST_SENSOR, &b); }
     if (have_auto) {
@@ -646,12 +734,15 @@ static void send_light_entities(void)
       pb_str(&b, 11, "%"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b); }
     /* the Echo Show's backlight as stock's Display settings: adaptive (Amazon's lux curve, shifted by the adjustment) or
      * a level of its own (settings.c backlight_auto; root's main.sh sets Android's settings from state/config) */
+    /* the level on its own where only it is offered (a round screen whose light sensor gives no reading: settings.c) */
+    if (listed(KEY_SCR_LEVEL)) {
+        PB(b, 160); pb_str(&b, 1, "screen_brightness"); pb_fixed32(&b, 2, KEY_SCR_LEVEL); pb_str(&b, 3, "Screen brightness");
+        pb_str(&b, 5, "mdi:brightness-6"); pb_float(&b, 6, 1); pb_float(&b, 7, 100); pb_float(&b, 8, 1); pb_uint(&b, 10, 1);
+        pb_str(&b, 11, "%"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b);
+    }
     if (listed(KEY_SCR_AUTO)) {
         { PB(b, 160); pb_str(&b, 1, "adaptive_brightness"); pb_fixed32(&b, 2, KEY_SCR_AUTO); pb_str(&b, 3, "Adaptive brightness");
           pb_str(&b, 5, "mdi:brightness-auto"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
-        { PB(b, 160); pb_str(&b, 1, "screen_brightness"); pb_fixed32(&b, 2, KEY_SCR_LEVEL); pb_str(&b, 3, "Screen brightness");
-          pb_str(&b, 5, "mdi:brightness-6"); pb_float(&b, 6, 1); pb_float(&b, 7, 100); pb_float(&b, 8, 1); pb_uint(&b, 10, 1);
-          pb_str(&b, 11, "%"); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b); }
         { PB(b, 160); pb_str(&b, 1, "adaptive_brightness_adjustment"); pb_fixed32(&b, 2, KEY_SCR_ADJUST);
           pb_str(&b, 3, "Adaptive brightness adjustment"); pb_str(&b, 5, "mdi:brightness-percent"); pb_float(&b, 6, -100);
           pb_float(&b, 7, 100); pb_float(&b, 8, 1); pb_uint(&b, 10, 1); pb_uint(&b, 12, 2); send_msg(LIST_NUMBER, &b); }
@@ -691,12 +782,19 @@ static int listed(int key)
     case KEY_MWW_DEPRECATED: return core_local_wake && core_wake_engine(-1) == WAKE_MWW;      /* only while the built-in one listens */
     case KEY_WIFI_MOTION: case KEY_WIFI_MOTION_SENS: return wifimotion_present() && settings_on("wifi_motion");
     case KEY_LED_AUTO: return have_auto;
-    case KEY_SCR_AUTO: case KEY_SCR_LEVEL: case KEY_SCR_ADJUST: return settings_find("screen_brightness_auto") != NULL;
+    /* a round screen's level without the two that follow the light sensor, where that gives no reading (settings.c) */
+    case KEY_SCR_LEVEL: return settings_find("screen_brightness") != NULL;
+    case KEY_SCR_AUTO: case KEY_SCR_ADJUST: return settings_find("screen_brightness_auto") != NULL;
     case KEY_LUX: return have_light && settings_on("light_sensor");
     case KEY_LIGHT: return ring_custom() || ringlive_enabled();             /* the palette's, or drawn live */
     case KEY_RING_FILL: case KEY_RING_ROTATION: case KEY_RING_LEDS: return ring_per_led() || ringlive_enabled();
     case KEY_LIVE_FRAME: case KEY_LIVE_ANIM: case KEY_LIVE_DESIGN_SVC: case KEY_LIVE_STOP: case KEY_LIVE_DESIGN:
         return ringlive_enabled();
+    case KEY_CLOCK_FACE: return settings_find("clock_face") != NULL;
+    case KEY_CLOCK_DIAL: case KEY_CLOCK_BG: case KEY_CLOCK_DATE:
+        return settings_find("clock_face") != NULL && ring_band_face(-1) > 0;
+    case KEY_NIGHT_MODE: case KEY_NIGHT_FROM: case KEY_NIGHT_TO: case KEY_NIGHT_CLOCK:
+        return screen_setting(key) != NULL;
     case KEY_CALL_VOLUME: if (!(dropin_running() && settings_on("drop_in"))) return 0;    /* calls only with Drop In */
         /* fall through */
     case KEY_ASSIST_VOLUME: case KEY_SOUNDS_VOLUME: case KEY_TIMER_VOLUME:       /* one that follows the music has none */
@@ -956,7 +1054,7 @@ static void send_live_states(void)
 
 static void on_setting(unsigned type, const unsigned char *p, const unsigned char *end)
 {
-    struct pbf f; unsigned key = 0; float num = 0; int on = 0; char opt[RD_NAME + 8] = "";
+    struct pbf f; unsigned key = 0; float num = 0; int on = 0; char opt[64] = "";
     while (pb_next(&p, end, &f)) {
         if (f.field == 1) key = f.v;
         else if (f.field == 2 && f.wire == 5) { uint32_t u = f.v; memcpy(&num, &u, 4); }
@@ -972,6 +1070,30 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
         send_setting(key); return;
     }
     if (type == SELECT_COMMAND && key == KEY_DENOISE) { for (int i = 0; i < 4; i++) if (!strcmp(opt, denoise_names[i])) core_mic_denoise(i); }
+    else if (type == SELECT_COMMAND && key == KEY_CLOCK_FACE) {
+        int n; const char *const *names = clockface_names(&n); char l[40], e[80];
+        for (int i = 0; i < n; i++) { face_label(i, l, sizeof l); if (!strcmp(opt, l)) { settings_set("clock_face", names[i], e, sizeof e); return; } }
+        return;
+    }
+    else if (type == SELECT_COMMAND && (key == KEY_CLOCK_DIAL || key == KEY_CLOCK_BG)) {
+        int n; const char *const *p = face_parts(key == KEY_CLOCK_DIAL, &n); char l[64], e[80];
+        for (int i = 0; i < n; i++) {
+            part_label(p[i], l, sizeof l);
+            if (!strcmp(opt, l)) { settings_set(key == KEY_CLOCK_DIAL ? "clock_dial" : "clock_background", p[i], e, sizeof e); return; }
+        }
+        return;
+    }
+    else if (key >= KEY_NIGHT_MODE && key <= KEY_NIGHT_CLOCK && listed(key)) {      /* saved, shown: settings.c */
+        const struct setting *st = screen_setting(key); char v[24] = "", e[80];
+        if (type == SWITCH_COMMAND && st->type == S_BOOL) snprintf(v, sizeof v, "%s", on ? "on" : "off");
+        else if (type == SELECT_COMMAND && st->type == S_CHOICE) {
+            const char *const *c; int n = settings_choices(st, &c); char l[24];
+            for (int i = 0; i < n; i++) { part_label(c[i], l, sizeof l); if (!strcmp(opt, l)) snprintf(v, sizeof v, "%s", c[i]); }
+        }
+        if (v[0]) settings_set(st->name, v, e, sizeof e);
+        return;
+    }
+    else if (type == SWITCH_COMMAND && key == KEY_CLOCK_DATE && listed(key)) { char e[80]; settings_set("clock_date", on ? "on" : "off", e, sizeof e); return; }
     else if (type == SELECT_COMMAND && key == KEY_BT_LANG) { for (int i = 0; i < bt_lang_count; i++) if (!strcmp(opt, bt_langs[i].name)) settings_bt_lang_index(i); }
     else if (type == NUMBER_COMMAND && key == KEY_MIC_LEVEL) {
         char v[16], e[80]; int l = num < MICGAIN_LEVEL_MIN ? MICGAIN_LEVEL_MIN : num > MICGAIN_LEVEL_MAX ? MICGAIN_LEVEL_MAX : (int)lroundf(num);

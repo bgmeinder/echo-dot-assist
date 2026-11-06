@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "board.h"
+#include "clockface.h"
 #include "core.h"
 #include "plugin.h"
 #include "a2dp.h"
@@ -109,7 +110,7 @@ static int colour_actual(void)
 
 /* ---------------------------------------------------------------- the table */
 
-enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, TIMER_STOP_OTHERS, STOP_ENDS, MULTI_PRESS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, ROUND_CLOCK, MUSIC_PAGE, SCR_AUTO, SCR_LEVEL, SCR_ADJUST, SCR_COLOUR, SCREEN_TEXT, SCREEN_HOLD, SCREEN_TIMERS, SCR_SLEEP, SCR_CLOCK, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WAKE_EVENTS, PLUGINS, COMMUNITY, REQUEST_TEXT, RING_LIVE, WIFI_MOTION,
+enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, TIMER_STOP_OTHERS, STOP_ENDS, MULTI_PRESS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, ROUND_CLOCK, CLOCK_FACE, CLOCK_DIAL, CLOCK_BG, CLOCK_DATE, NIGHT, NIGHT_FROM, NIGHT_TO, NIGHT_CLOCK, MUSIC_PAGE, SCR_AUTO, SCR_LEVEL, SCR_ADJUST, SCR_COLOUR, SCREEN_TEXT, SCREEN_HOLD, SCREEN_TIMERS, SCR_SLEEP, SCR_CLOCK, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WAKE_EVENTS, PLUGINS, COMMUNITY, REQUEST_TEXT, RING_LIVE, WIFI_MOTION,
           WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET,
@@ -188,6 +189,18 @@ static const struct setting table[NSET] = {
     /* ring_band.c: a clock on a round screen (rook), drawn by the band's renderer; off / 24h / 12h.  Not screen_clock: that
      * is the Echo Shows' clock where the screen went dark (screen.c), a switch */
     [ROUND_CLOCK] = { "round_clock", "Clock on the screen", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    /* the firmware's analog faces (clockface.c) in place of the digital clock; by template id, "digital" for none */
+    [CLOCK_FACE]  = { "clock_face", "Clock face", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    /* the face's own dial and background (clockface_dial_names: the template's, by short name; a new face starts at its
+     * defaults) and its date window, the day of the month in it */
+    [CLOCK_DIAL]  = { "clock_dial", "Clock dial", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [CLOCK_BG]    = { "clock_background", "Clock background", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [CLOCK_DATE]  = { "clock_date", "Date on the clock face", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* ring_band.c (ring_band_screen): the round screen's night, stock's Night Mode (its backlight: SCR_AUTO above) */
+    [NIGHT]       = { "night_mode", "Night mode", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [NIGHT_FROM]  = { "night_from", "Night starts", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [NIGHT_TO]    = { "night_to", "Night ends", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [NIGHT_CLOCK] = { "night_clock", "Night clock", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
     [ARB]         = { "arbitration", "Wake word arbitration with other Echos", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     /* arb.c keeps them in memory, state/config on disk: lockdown.sh admits Kiosk Satellite's port by it */
     [ARB_MODE]    = { "arbitration_mode", "Arbitration mode", "Features", NULL, S_CHOICE, 0, 0, 1, 0 },
@@ -282,6 +295,9 @@ static const struct setting table[NSET] = {
     [CALL_OFFSET] = { "call_volume_offset", "Calls above the music", "Sound", NULL, S_INT, -VOL_OFFSET_MAX, VOL_OFFSET_MAX, 1, 0 },
 };
 
+/* a round screen whose backlight ring_band.c sets (rook, Android 5.1: ring_band_has_backlight) */
+static int round_backlight(void) { return board.screen_round && ring_band_has_backlight(); }
+
 static int present(enum id i)
 {
     switch (i) {
@@ -301,7 +317,11 @@ static int present(enum id i)
     case BAND: return ring_band_rows(-1) >= 0;
     case MUSIC_PAGE: return screen_ui();
     case KIOSK_NET: case KIOSK_MIC: case KIOSK_CAM: case KIOSK_DLNA: return board.kiosk;
-    case SCR_AUTO: case SCR_LEVEL: case SCR_ADJUST: return board.backlight || getenv("HASSMIC_FAKE_BACKLIGHT");   /* tests */
+    /* the backlight: the Echo Shows' through Android's own settings (root's main.sh backlight); a round screen's (rook)
+     * by ring_band.c, from the light sensor as Android 5.1's adaptive mode does (ring_band_screen) */
+    case SCR_LEVEL: return board.backlight || getenv("HASSMIC_FAKE_BACKLIGHT") || round_backlight();   /* tests */
+    case SCR_AUTO: case SCR_ADJUST:
+        return board.backlight || getenv("HASSMIC_FAKE_BACKLIGHT") || (round_backlight() && core_lux() == core_lux());
     case SCR_COLOUR: return colour_actual() >= 0;
     case SCREEN_TEXT: return screen_words_on(-1) >= 0;
     case SCREEN_HOLD: return screen_words_hold(-1) >= 0;
@@ -309,6 +329,10 @@ static int present(enum id i)
     case SCR_CLOCK: return screen_clock(-1) >= 0;
     case SCR_SLEEP: return screen_sleep_min(-1) >= 0;
     case ROUND_CLOCK: return ring_band_rows(-1) >= 0 && board.screen_round;   /* the renderer's text: the round screen's */
+    case CLOCK_FACE: case CLOCK_DIAL: case CLOCK_BG: case CLOCK_DATE:
+        return ring_band_rows(-1) >= 0 && board.screen_round && clockface_count() > 0;
+    case NIGHT_CLOCK: return round_backlight();          /* the screen off: the same calls */
+    case NIGHT: case NIGHT_FROM: case NIGHT_TO: return ring_band_rows(-1) >= 0 && board.screen_round;
     case RING_ROT: return ring_band_rows(-1) < 0;                 /* LEDs to turn: the Dots' ring, not the band */
     default: return 1;
     }
@@ -345,11 +369,29 @@ int settings_max(const struct setting *s)
 }
 
 static const char *const clock_modes[] = { "off", "24h", "12h" };
+static const char *const night_modes[] = { "off", "automatic", "scheduled" };
+/* the night's start and end by the half hour, "00:00".."23:30" (ring_band_screen's 0..47) */
+static const char *const *half_hours(void)
+{
+    static char text[48][6]; static const char *names[48];
+    if (!names[0]) for (int i = 0; i < 48; i++) { snprintf(text[i], sizeof text[i], "%02d:%02d", i / 2, i % 2 * 30); names[i] = text[i]; }
+    return names;
+}
 
 int settings_choices(const struct setting *s, const char *const **names)
 {
     switch (s - table) {
     case ROUND_CLOCK: *names = clock_modes; return 3;
+    case NIGHT: *names = night_modes; return 3;
+    case NIGHT_FROM: case NIGHT_TO: *names = half_hours(); return 48;
+    case CLOCK_FACE: { int n; *names = clockface_names(&n); return n; }
+    /* the face's own: none on the digital clock (the page shows the row empty, Home Assistant does not list it) */
+    case CLOCK_DIAL: case CLOCK_BG: {
+        int f = ring_band_face(-1), n = 0;
+        if (f <= 0) return 0;
+        *names = s - table == CLOCK_DIAL ? clockface_dial_names(f - 1, &n) : clockface_background_names(f - 1, &n);
+        return n;
+    }
     case DENOISE: *names = denoise_values; return 4;
     case BT_LANG:
         for (int i = 0; i < bt_lang_count; i++) bt_lang_codes[i] = bt_langs[i].code;
@@ -449,9 +491,9 @@ int settings_get(const struct setting *s)
     case ASSIST_OFFSET: case SOUNDS_OFFSET: case TIMER_OFFSET: case CALL_OFFSET: return core_kind_offset((int)(s - table - ASSIST_LINK) / 3);
     case BAND: return ring_band_rows(-1);
     case MUSIC_PAGE: return screen_music_page(-1);
-    case SCR_AUTO: return backlight_auto;
-    case SCR_LEVEL: return backlight_level;
-    case SCR_ADJUST: return backlight_adjust;
+    case SCR_AUTO: return board.screen_round ? ring_band_screen(SCR_ADAPTIVE, -1) : backlight_auto;
+    case SCR_LEVEL: return board.screen_round ? ring_band_screen(SCR_BRIGHTNESS, -1) : backlight_level;
+    case SCR_ADJUST: return board.screen_round ? ring_band_screen(SCR_ADJUSTMENT, -1) - 100 : backlight_adjust;
     case SCR_COLOUR: { int v = colour_actual(); return v >= 0 ? v : adaptive_colour; }
     case SCREEN_TEXT: return screen_words_on(-1);
     case SCREEN_HOLD: return screen_words_hold(-1);
@@ -459,6 +501,14 @@ int settings_get(const struct setting *s)
     case SCR_CLOCK: return screen_clock(-1);
     case SCR_SLEEP: return screen_sleep_min(-1);
     case ROUND_CLOCK: return ring_band_clock(-1);
+    case CLOCK_FACE: return ring_band_face(-1);
+    case CLOCK_DIAL: return ring_band_dial(-2);
+    case CLOCK_BG: return ring_band_background(-2);
+    case CLOCK_DATE: return ring_band_date(-1);
+    case NIGHT: return ring_band_screen(SCR_NIGHT, -1);
+    case NIGHT_FROM: return ring_band_screen(SCR_NIGHT_FROM, -1);
+    case NIGHT_TO: return ring_band_screen(SCR_NIGHT_TO, -1);
+    case NIGHT_CLOCK: return ring_band_screen(SCR_NIGHT_CLOCK, -1);
     default: return 0;
     }
 }
@@ -539,9 +589,10 @@ static void put(enum id i, int v)
     case ASSIST_OFFSET: case SOUNDS_OFFSET: case TIMER_OFFSET: case CALL_OFFSET: core_set_kind_offset((i - ASSIST_LINK) / 3, v); break;
     case BAND: ring_band_rows(v); break;
     case MUSIC_PAGE: screen_music_page(v); break;
-    case SCR_AUTO: backlight_auto = v; break;                   /* root's main.sh sees state/config change */
-    case SCR_LEVEL: backlight_level = v; break;
-    case SCR_ADJUST: backlight_adjust = v; break;
+    /* the Echo Shows: root's main.sh sees state/config change; a round screen: ring_band.c sets it */
+    case SCR_AUTO: if (board.screen_round) ring_band_screen(SCR_ADAPTIVE, v); else backlight_auto = v; break;
+    case SCR_LEVEL: if (board.screen_round) ring_band_screen(SCR_BRIGHTNESS, v); else backlight_level = v; break;
+    case SCR_ADJUST: if (board.screen_round) ring_band_screen(SCR_ADJUSTMENT, v + 100); else backlight_adjust = v; break;
     case SCR_COLOUR: adaptive_colour = v; break;                /* main.sh as well */
     case SCREEN_TEXT: screen_words_on(v); break;
     case SCREEN_HOLD: screen_words_hold(v); break;
@@ -549,6 +600,14 @@ static void put(enum id i, int v)
     case SCR_CLOCK: screen_clock(v); break;
     case SCR_SLEEP: screen_sleep_min(v); break;
     case ROUND_CLOCK: ring_band_clock(v); break;
+    case CLOCK_FACE: ring_band_face(v); break;
+    case CLOCK_DIAL: ring_band_dial(v); break;
+    case CLOCK_BG: ring_band_background(v); break;
+    case CLOCK_DATE: ring_band_date(v); break;
+    case NIGHT: ring_band_screen(SCR_NIGHT, v); break;
+    case NIGHT_FROM: ring_band_screen(SCR_NIGHT_FROM, v); break;
+    case NIGHT_TO: ring_band_screen(SCR_NIGHT_TO, v); break;
+    case NIGHT_CLOCK: ring_band_screen(SCR_NIGHT_CLOCK, v); break;
     default: break;
     }
 }
@@ -594,7 +653,8 @@ static size_t format(const struct setting *s, char *out, size_t cap)
  * engine are about plugins, and an Echo with plugins off that takes plugins=on, plugins_community=on and
  * wake_engine=plugin:<id> in one request ends as one that took them one by one in that order.  An export lists the two
  * plugin switches first as well (settings_text), so the file reads in the order it is applied */
-static int switches(int i) { return i == VOL_SPLIT || i == ASSIST_LINK || i == SOUNDS_LINK || i == TIMER_LINK || i == CALL_LINK || i == COMMUNITY; }
+/* the clock face too: its dial's and background's choices are its own, so they must find it set */
+static int switches(int i) { return i == VOL_SPLIT || i == ASSIST_LINK || i == SOUNDS_LINK || i == TIMER_LINK || i == CALL_LINK || i == COMMUNITY || i == CLOCK_FACE; }
 #define RANKS 3
 static int rank(int i) { return i == PLUGINS ? 0 : switches(i) ? 1 : 2; }
 
@@ -820,6 +880,8 @@ int settings_set(const char *name, const char *value, char *err, size_t errsz)
     }
     core_settings_changed();
     if (s->feature && was != v) core_entities_changed();          /* Home Assistant reads the list again */
+    /* another face: other dials and backgrounds, and an ESPHome select's options are part of its listing */
+    else if (s - table == CLOCK_FACE && was != v) core_entities_changed();
     return 0;
 }
 
@@ -837,6 +899,8 @@ size_t settings_text(char *out, size_t cap, int export_only)
         if (export_only && ids[i] == LED_LEVEL && present(LED_AUTO) && core_led_auto(-1)) continue;
         if (export_only && ids[i] == SCR_COLOUR) snprintf(v, sizeof v, "%s", adaptive_colour ? "on" : "off");
         else format(s, v, sizeof v);
+        /* a choice with nothing to choose (the dial on the digital clock): no line, which an import could not take */
+        if (s->type == S_CHOICE && !v[0]) continue;
         n += (size_t)snprintf(out + n, cap - n, "%s=%s\n", s->name, v);
     }
     return n < cap ? n : cap;

@@ -35,6 +35,7 @@
 #endif
 #include "ring.h"
 #include "board.h"
+#include "clockface.h"
 #include "core.h"
 #include "ringdesign.h"
 #include "screen.h"
@@ -446,6 +447,11 @@ static int sdk_level(void)
 #endif
 }
 
+/* the screen's sleep at night (screen_tick): band thread only.  woke_at: the last wake or keep-awake, asleep: put to
+ * sleep by us, screen_dark: night with the night clock off (the clock then no longer keeps the screen on) */
+static long long woke_at;
+static int asleep, screen_dark;
+
 /* uptimeMillis (CLOCK_MONOTONIC) for the power service's calls: decimal for the service tool's i64, and its two halves
  * for Android 5.1, whose service tool has no i64 (a long is eight bytes in the parcel: two i32; rook, 2026-11-05).
  * The halves as signed numbers: that tool reads an i32 with atoi, which stops at 2147483647, and the low half is over
@@ -482,6 +488,7 @@ static int screen_interactive(void)
 static void screen_wake(void)
 {
     char ms[24], lo[16], hi[16];
+    woke_at = now_ms(); asleep = 0;
     if (svc_uptime(ms, lo, hi)) {
         char *wake[] = { "/system/bin/service", "call", "power", "9", "i32", lo, "i32", hi, "s16", "hassmic", "s16", "android", NULL };
         run_quiet(wake);
@@ -709,11 +716,255 @@ int ring_band_clock(int set)
     return r;
 }
 
+/* An analog face in place of the digital clock (setting clock_face, ring_band_face: an index of clockface_names, 0
+ * "digital"): the firmware's own art (clockface.c), drawn by the renderer from the package where it lies (kinds 7 and
+ * 8 once per renderer, faces_told), every second for the second hand: cleared (6), each part (4: background, dial,
+ * hands), shown (5).  Night (the night images and tints, as stock's dimmed face): screen_tick's, by the setting
+ * night_mode (the room dark by the light sensor, or the night's hours).  clock_shown is then 100 + the face */
+static int clock_face, faces_told;
+/* the face's dial and background (-1: the template's own default; a new face starts there again: one template's dial
+ * index means nothing for another's) and the date window; face_ver counts changes, drawn at once (face_drawn) */
+static int clock_dial = -1, clock_bg = -1, clock_date, face_ver, face_drawn;
+
+int ring_band_face(int set)
+{
+    int n; clockface_names(&n);
+    pthread_mutex_lock(&lock);
+    if (set >= 0 && set < n && set != clock_face) { clock_face = set; clock_dial = clock_bg = -1; face_ver++; pthread_cond_signal(&cv); }
+    int r = clock_face;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
+/* one of the face's lists: dial (names) or background; set -2 reads what is drawn */
+static int face_pick(int *v, int set, int dial)
+{
+    pthread_mutex_lock(&lock); int face = clock_face; pthread_mutex_unlock(&lock);
+    int n = 0;
+    if (face > 0) { if (dial) clockface_dial_names(face - 1, &n); else clockface_background_names(face - 1, &n); }
+    pthread_mutex_lock(&lock);
+    if (set >= -1 && set < n && set != *v && face == clock_face) { *v = set; face_ver++; pthread_cond_signal(&cv); }
+    int r = *v;
+    pthread_mutex_unlock(&lock);
+    if (r < 0) r = face > 0 ? (dial ? clockface_default_style(face - 1) : clockface_default_color(face - 1)) : 0;
+    return r;
+}
+int ring_band_dial(int set) { return face_pick(&clock_dial, set, 1); }
+int ring_band_background(int set) { return face_pick(&clock_bg, set, 0); }
+
+int ring_band_date(int set)
+{
+    pthread_mutex_lock(&lock);
+    if (set >= 0 && !!set != clock_date) { clock_date = !!set; face_ver++; pthread_cond_signal(&cv); }
+    int r = clock_date;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
+/* The screen's backlight and night, stock's Display and Night Mode settings (KnightSettings: "Adaptive Brightness", the
+ * brightness slider; Night Mode off / Scheduled / Automatic "based on available light", "Nighttime Clock: show a dim
+ * clock, instead of turning off the screen").  Settings screen_brightness(_auto, _adjust), night_mode,
+ * night_from, night_to, night_clock; ring_band_screen.
+ * The backlight: Android's adaptive mode follows its light sensor, but its level can only be moved from outside by
+ * a settings write, which Android 5.1 refuses hassmic's user ("null from uid 1000 not allowed to perform
+ * WRITE_SETTINGS"), and its temporary override (IPowerManager.setTemporaryScreenBrightnessSettingOverride, the slider
+ * dialog's own call, transaction 20 on the Spot's Fire OS 5; system's DEVICE_POWER is enough) counts only in manual
+ * mode.  So Android stays manual (device.conf ANDROID_SETTINGS, root) and hassmic does what its adaptive mode did, with
+ * the firmware's own curve and gamma (board.backlight_curve, MonotoneCubicSpline as Android's) from core_lux(), and sets the
+ * level by the override: no root, at once, Android ramping to it.  The override lives in system_server only, so it is
+ * sent again every minute (a restarted one would have lost it).  Ambient light as Android 5.1's
+ * AutomaticBrightnessController takes it: brighter by 10 % for 4 s, darker by 20 % for 8 s, else the last.
+ * The level: manual, 1..100 % of 1..255 (Android's range); adaptive, the adjustment (screen_brightness_adjust, as the
+ * Echo Shows'), 0 the curve itself and the ends gamma max_gamma^-+1, as Android's (its -1..1 setting; Android 5.1's own
+ * slider is both).  Night: the room dark (automatic; by board.lux_dark as the
+ * clock faces' night version, which follows it too), or between night_from and night_to (scheduled, and automatic
+ * with no light sensor); with the night clock the level at NIGHT_LEVEL at most and the faces' night images, without it
+ * the screen put to sleep (IPowerManager.goToSleep, 10) once nothing has shown on it for DARK_AFTER_MS, woken by
+ * patterns as ever and at the night's end.  Only where the transactions are known (Android 5.1): backlight_tx */
+enum { NIGHT_LEVEL = 16, DARK_AFTER_MS = 10000 };
+static int scr[SCR_COUNT] = { [SCR_BRIGHTNESS] = 50, [SCR_ADAPTIVE] = 1, [SCR_NIGHT] = 1,
+                              [SCR_NIGHT_FROM] = 42, [SCR_NIGHT_TO] = 14, [SCR_NIGHT_CLOCK] = 1, [SCR_ADJUSTMENT] = 100 };
+static const int scr_max[SCR_COUNT] = { 100, 1, 2, 47, 47, 1, 200 };
+static int scr_ready;                            /* settings loaded: nothing set before (ring_band_screen_ready) */
+static int night;                                /* band thread */
+
+static int backlight_tx(void)
+{
+    if (!board.backlight_curve) return 0;
+#ifndef __ANDROID__
+    if (getenv("HASSMIC_FAKE_BACKLIGHT")) return 20;  /* tests: the calls into core_spawn */
+#endif
+    return sdk_level() == 22 ? 20 : 0;               /* probed on Android 5.1 only (rook); others: other numbers */
+}
+
+int ring_band_has_backlight(void) { return ring_band_rows(-1) >= 0 && backlight_tx() > 0; }
+
+int ring_band_screen(int what, int set)
+{
+    if (what < 0 || what >= SCR_COUNT) return -1;
+    pthread_mutex_lock(&lock);
+    if (set >= 0 && set <= scr_max[what] && set != scr[what]) { scr[what] = set; pthread_cond_signal(&cv); }
+    int r = scr[what];
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
+void ring_band_screen_ready(void) { pthread_mutex_lock(&lock); scr_ready = 1; pthread_cond_signal(&cv); pthread_mutex_unlock(&lock); }
+
+/* Android's MonotoneCubicSpline (Fritsch-Carlson) through (0, level[0]), (lux[i], level[i + 1]), levels / 255 */
+static float curve(const struct board_backlight *b, float x)
+{
+    int n = b->n + 1;
+    float X[13] = { 0 }, Y[13] = { 0 }, d[12] = { 0 }, m[13] = { 0 };
+    X[0] = 0; Y[0] = b->level[0] / 255.f;
+    for (int i = 1; i < n; i++) { X[i] = (float)b->lux[i - 1]; Y[i] = b->level[i] / 255.f; }
+    for (int i = 0; i < n - 1; i++) d[i] = (Y[i + 1] - Y[i]) / (X[i + 1] - X[i]);
+    m[0] = d[0]; m[n - 1] = d[n - 2];
+    for (int i = 1; i < n - 1; i++) m[i] = (d[i - 1] + d[i]) * 0.5f;
+    for (int i = 0; i < n - 1; i++) {
+        if (d[i] == 0) { m[i] = m[i + 1] = 0; continue; }
+        float a = m[i] / d[i], c = m[i + 1] / d[i], h = hypotf(a, c);
+        if (h > 9) { float t = 3 / h; m[i] = t * a * d[i]; m[i + 1] = t * c * d[i]; }
+    }
+    if (x <= X[0]) return Y[0];
+    if (x >= X[n - 1]) return Y[n - 1];
+    int i = 0;
+    while (x >= X[i + 1]) i++;
+    float h = X[i + 1] - X[i], t = (x - X[i]) / h;
+    return (Y[i] * (1 + 2 * t) + h * m[i] * t) * (1 - t) * (1 - t) + (Y[i + 1] * (3 - 2 * t) + h * m[i + 1] * (t - 1)) * t * t;
+}
+
+/* the backlight (1..255) for the light sensor's lux (< 0 or NAN: none, the level's own), level pct, adjust -100..100,
+ * adaptive */
+int ring_backlight_level(float lux, int pct, int adjust, int adaptive)
+{
+    const struct board_backlight *b = board.backlight_curve;
+    if (!adaptive || !b || b->n < 1 || b->n > 12 || !(lux >= 0)) return 1 + (pct * 254 + 50) / 100;
+    float v = curve(b, floorf(lux * b->lux_scale))   /* Android's sensor: whole lux (resolution 1) */, adj = adjust / 100.f;
+    if (adj != 0 && v > 0) v = powf(v, powf(b->max_gamma, -adj));
+    int l = (int)lroundf(v * 255);
+    return l < 1 ? 1 : l > 255 ? 255 : l;
+}
+
+/* night by the settings c (a copy of scr) at tm, for ambient lux (< 0 or NAN: none); was: the last answer (hysteresis) */
+static int night_of(const int *c, const struct tm *tm, float lux, int was)
+{
+    if (!c[SCR_NIGHT]) return 0;
+    if (c[SCR_NIGHT] == 1 && lux >= 0) {
+        float dark = board.lux_dark > 0 ? board.lux_dark : 3;
+        return was ? lux < 3 * dark : lux < dark;
+    }
+    int now = tm->tm_hour * 60 + tm->tm_min, from = c[SCR_NIGHT_FROM] * 30, to = c[SCR_NIGHT_TO] * 30;
+    if (from == to) return 0;
+    return from < to ? now >= from && now < to : now >= from || now < to;
+}
+
+static void screen_sleep(void)
+{
+    char ms[24], lo[16], hi[16];
+    svc_uptime(ms, lo, hi);                          /* the two halves: only Android 5.1's call is known (backlight_tx) */
+    /* goToSleep(long eventTime, int reason, int flags): reason 0, an application's (Android 5.1, rook 2026-11-06) */
+    char *argv[] = { "/system/bin/service", "call", "power", "10", "i32", lo, "i32", hi, "i32", "0", "i32", "0", NULL };
+    run_quiet(argv);
+}
+
+/* the clock and what plays keep the screen on, except in a dark night */
+static void screen_keep(void) { if (!screen_dark) screen_wake(); }
+
+/* once a second, band thread: idle when no pattern shows */
+static void screen_tick(long long now, int idle)
+{
+    static float amb = NAN; static long long up_since, down_since, sent_at, idle_since; static int sent = -1;
+    if (!idle) idle_since = 0; else if (!idle_since) idle_since = now;
+    int c[SCR_COUNT];
+    pthread_mutex_lock(&lock); memcpy(c, scr, sizeof c); int ready = scr_ready; pthread_mutex_unlock(&lock);
+    if (!ready || !board.screen_round) return;   /* night is the round screen's clock's (and the backlight with it) */
+    float l = core_lux();
+    if (!(l >= 0)) amb = NAN;
+    else if (!(amb >= 0)) amb = l;
+    else if (l > amb * 1.1f + 0.01f) { down_since = 0; if (!up_since) up_since = now; if (now - up_since >= 4000) { amb = l; up_since = 0; } }
+    else if (l < amb * 0.8f) { up_since = 0; if (!down_since) down_since = now; if (now - down_since >= 8000) { amb = l; down_since = 0; } }
+    else up_since = down_since = 0;
+    time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
+    int n = night_of(c, &tm, amb, night);
+    if (n != night) {
+        night = n;
+        fprintf(stderr, "band: night %s (%s)\n", n ? "begins" : "ends", c[SCR_NIGHT] == 1 && amb >= 0 ? "the room's light" : "the schedule");
+        pthread_mutex_lock(&lock); face_ver++; pthread_mutex_unlock(&lock);   /* the faces' night images, at once */
+    }
+    int tx = backlight_tx();
+    if (!tx) return;
+    int lv = ring_backlight_level(amb, c[SCR_BRIGHTNESS], c[SCR_ADJUSTMENT] - 100, c[SCR_ADAPTIVE]);
+    if (night && c[SCR_NIGHT_CLOCK] && lv > NIGHT_LEVEL) lv = NIGHT_LEVEL;
+    if (lv != sent || now - sent_at >= 60000) {
+        char v[8], code[8]; snprintf(v, sizeof v, "%d", lv); snprintf(code, sizeof code, "%d", tx);
+        char *argv[] = { "/system/bin/service", "call", "power", code, "i32", v, NULL };
+        run_quiet(argv);
+        if (lv != sent) fprintf(stderr, "band: backlight %d (%s%s)\n", lv, c[SCR_ADAPTIVE] ? "adaptive" : "fixed", night && c[SCR_NIGHT_CLOCK] ? ", night" : "");
+        sent = lv; sent_at = now;
+    }
+    screen_dark = night && !c[SCR_NIGHT_CLOCK];
+    /* dark DARK_AFTER_MS after the last pattern ended, not after it began: a reply longer than that left the screen
+     * dark the moment it was over */
+    if (screen_dark && !asleep && idle && now - (idle_since > woke_at ? idle_since : woke_at) >= DARK_AFTER_MS) {
+        screen_sleep(); asleep = 1;
+        fprintf(stderr, "band: the screen off for the night\n");
+    }
+    /* the night over (or the night clock on): the clock again, where one shows; else the next pattern wakes it */
+    if (!screen_dark && asleep) {
+        pthread_mutex_lock(&lock); int shows = clock_mode != 0; pthread_mutex_unlock(&lock);
+        if (shows) screen_wake(); else asleep = 0;
+    }
+}
+
+static int face_draw(int fd, int tmpl, const struct tm *tm)
+{
+    if (!faces_told) {
+        const char *apk = clockface_apk(), *pkg = clockface_package();
+        if (send_msg(fd, 7, 0, 0, 0, apk, strlen(apk)) || send_msg(fd, 8, 0, 0, 0, pkg, strlen(pkg))) return -1;
+        faces_told = 1;
+    }
+    struct cf_op ops[48];
+    pthread_mutex_lock(&lock); int dial = clock_dial, bg = clock_bg, date = clock_date; pthread_mutex_unlock(&lock);
+    int n = clockface_ops(tmpl, dial, bg, date, tm, night, ops, 48);   /* night: screen_tick's */
+    if (n < 0) return 1;                            /* no such face: the digital clock */
+    if (send_msg(fd, 6, 0, 0, 0, NULL, 0)) return -1;
+    for (int i = 0; i < n; i++) {
+        if (ops[i].text[0]) {                       /* the date: kind 9, centred on its point of the 480 face, scaled */
+            int s = screen_h > 0 ? screen_h : 480, x = ops[i].cx * s / 480, y = ops[i].cy * s / 480;
+            if (x > 0 && send_msg(fd, 9, (x & 0xffff) << 16 | (y & 0xffff), ops[i].size * s / 480, (int)ops[i].tint,
+                                  ops[i].text, strlen(ops[i].text))) return -1;
+            continue;
+        }
+        int c = ops[i].cx < 0 ? -1 : (ops[i].cx & 0xffff) << 16 | (ops[i].cy & 0xffff);
+        /* a masked part: a layer of its own (11), the part (4), its mask drawn DST_IN and the layer merged (12) */
+        if (ops[i].mask[0] && send_msg(fd, 11, 0, 0, 0, NULL, 0)) return -1;
+        if (send_msg(fd, 4, ops[i].rot, (int)ops[i].tint, c, ops[i].name, strlen(ops[i].name))) return -1;
+        if (ops[i].mask[0] && send_msg(fd, 12, 0, 0, -1, ops[i].mask, strlen(ops[i].mask))) return -1;
+    }
+    return send_msg(fd, 5, 0, 0, 0, NULL, 0) ? -1 : 0;
+}
+
 static int clock_tick(int fd)                   /* -1: the renderer is gone */
 {
-    pthread_mutex_lock(&lock); int mode = clock_mode; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); int mode = clock_mode, face = clock_face, ver = face_ver; pthread_mutex_unlock(&lock);
+    if (asleep && mode && clock_shown) return 0;    /* the screen off for the night: nothing read or drawn till it wakes */
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
     int minute = tm.tm_hour * 60 + tm.tm_min;
+    if (mode && face > 0 && face <= clockface_count()) {
+        int second = minute * 60 + tm.tm_sec;
+        if (clock_shown == 100 + face && second == clock_minute && ver == face_drawn) return 0;
+        face_drawn = ver;                           /* a dial, background or date changed: drawn now, not next second */
+        int fresh = clock_shown != 100 + face, r = face_draw(fd, face - 1, &tm);
+        if (r < 0) return -1;
+        if (!r) {
+            if (fresh) fprintf(stderr, "band: the clock face %s on the screen\n", clockface_names(&(int){0})[face]);
+            if (fresh || tm.tm_sec == 0) screen_keep();   /* as below: the screen kept on, once a minute */
+            clock_shown = 100 + face; clock_minute = second;
+            return 0;
+        }
+        face = 0;                                   /* the package lacks it now: the digital clock */
+    }
     if (mode == clock_shown && (!mode || minute == clock_minute)) return 0;
     if (!mode) {
         if (clock_shown > 0 && send_msg(fd, 1, 0, 0, 0, NULL, 0)) return -1;
@@ -730,8 +981,8 @@ static int clock_tick(int fd)                   /* -1: the renderer is gone */
     if (mode != clock_shown) fprintf(stderr, "band: the clock on the screen, %s\n", mode == 2 ? "12 h" : "24 h");
     /* the screen kept on: Android 5.1's settings tool writes no screen_off_timeout (Amazon keeps the screen rows
      * elsewhere), so the timeout set above does not reach the power manager there; a userActivity every minute
-     * does, with stock's 5 min (1 min muted or in Do not disturb: still within) */
-    screen_wake();
+     * does, with stock's 5 min (1 min muted or in Do not disturb: still within); not in a dark night (screen_tick) */
+    screen_keep();
     clock_shown = mode; clock_minute = minute;
     return 0;
 }
@@ -799,7 +1050,7 @@ static int np_tick(int fd)
     if (ver == np_shown && np_on) {
         pthread_mutex_unlock(&lock);
         time_t t = time(NULL); int m = (int)(t / 60);
-        if (m != minute) { minute = m; screen_wake(); }
+        if (m != minute) { minute = m; screen_keep(); }
         return 0;
     }
     char title[160], artist[160]; uint8_t *art = NULL; size_t artlen = np.artlen;
@@ -821,7 +1072,7 @@ static int np_tick(int fd)
     if (r) return -1;
     if (!np_on) fprintf(stderr, "band: now playing on the screen\n");
     np_shown = ver; np_on = 1; minute = -1;
-    screen_wake();
+    screen_keep();
     return 0;
 }
 
@@ -851,6 +1102,8 @@ static void *band_thread(void *arg)
                (asked first): a screen put out from the drawer stays out, whatever userActivity does to a dark one */
             if (t != timeout && timeout == NEVER_MS && screen_interactive() == 1) screen_activity();
             if (t != timeout) { timeout = t; screen_timeout(t); }
+            pthread_mutex_lock(&lock); int idle = top(now) >= P_COUNT; pthread_mutex_unlock(&lock);
+            screen_tick(now, idle);
             next_check = now + 1000;
         }
         if (wake && now - last_wake >= WAKE_EVERY) { last_wake = now; screen_wake(); }
@@ -875,7 +1128,7 @@ static void *band_thread(void *arg)
                 pthread_mutex_unlock(&lock);
                 continue;
             }
-            fails = 0; have_rows = want; clock_shown = -1; clock_minute = -1; np_on = 0; np_shown = 0;   /* a fresh renderer: all again */
+            fails = 0; have_rows = want; clock_shown = -1; clock_minute = -1; np_on = 0; np_shown = 0; faces_told = 0;   /* a fresh renderer: all again */
             if (!want) fprintf(stderr, "band: off, the whole screen is the apps'\n");
         }
         struct rgb led[LEDS];
@@ -940,6 +1193,7 @@ static void *band_thread(void *arg)
             pthread_cond_timedwait(&cv, &lock, &ts);
         } else {                                    /* dark: until something changes, or the timeout check is due */
             struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); ts.tv_sec += 1;
+            if (clock_shown > 100) ts.tv_nsec = 20000000L;  /* an analog face: just past the next second, its hand on time */
             if (!wake_req) pthread_cond_timedwait(&cv, &lock, &ts);
         }
         pthread_mutex_unlock(&lock);

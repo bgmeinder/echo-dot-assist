@@ -227,7 +227,7 @@ const LAYOUT = {
   voice: [['Microphone', 'mic_level', 'noise_reduction'], ['Mute and wake sound removal', 'mute', 'do_not_disturb', 'wake_sound_removal'],
           ['Requests', 'wake_word_in_request', 'end_of_request', 'stop_ends_listening'], ['Action button', 'multi_press'], ['Timers', 'timer_ring', 'timer_sound', 'timer_stop_any', 'timer_stop_from_others']],
   wake: [['Engine', 'wake_engine'], ['How it hears you', 'speech_language', 'wake_word_adaptation']],
-  lights: [['Brightness', 'led_auto_brightness', 'led_brightness'], ['Position', 'ring_rotation', 'light_band', 'round_clock'], ['Live from Home Assistant', 'ring_live'], ['Screen', ...BRIGHTNESS]],
+  lights: [['Brightness', 'led_auto_brightness', 'led_brightness'], ['Position', 'ring_rotation', 'light_band', 'round_clock'], ['Live from Home Assistant', 'ring_live'], ['Screen', ...BRIGHTNESS], ['Clock face', 'clock_face', 'clock_dial', 'clock_background', 'clock_date'], ['Night', 'night_mode', 'night_from', 'night_to', 'night_clock']],
 };
 
 // help: what it does, in the user's terms.  ha: also in Home Assistant (true), or for features the entities it adds.
@@ -263,8 +263,8 @@ const HELP = {
   even_volume: { help: 'Makes every step of the volume the same: each point is 0.5 dB, each press of the volume buttons 5 dB, from 1 (quiet, about 50 dB under full) to 100 (as loud as before). Without it the Echo plays a volume as a stock Echo does, where most of the change happens at one end: on an Echo Show the bottom half covers more than twice the range of the top half, and a step of one point often does nothing at all. The Echo keeps its own volume setting at the nearest step above, and turns the sound down the rest of the way itself. 0 is silent either way. A Bluetooth speaker that sets its own volume still does. Exported with the settings. On by default.' },
   led_auto_brightness: { ha: true, help: 'The ring dims and brightens with the room, from the Echo\'s light sensor and Amazon\'s own curve, as on a stock Echo.' },
   led_brightness: { ha: true, help: 'A fixed brightness for the ring. Setting one turns auto brightness off.' },
-  screen_brightness_auto: { ha: true, help: 'The screen dims and brightens with the room, on Amazon\'s own curve from the Echo\'s light sensor, as "Adaptive brightness" on a stock Echo Show does. That curve is dark: under about 5 lux the screen is barely lit, and it is near full brightness only from about 100 lux. If it is too dim for you, raise "Adaptive brightness adjustment", as you would move the slider on a stock Echo Show. Off by default: the screen stays at "Screen brightness".' },
-  screen_brightness: { ha: true, help: 'How bright the screen is with adaptive brightness off. Default 47 %, what the Echo ran at before this setting existed. With Kiosk Satellite installed, the Echo switches off the app\'s own adaptive brightness, so these settings set the screen.' },
+  screen_brightness_auto: { ha: true, help: 'The screen dims and brightens with the room, on Amazon\'s own curve from the Echo\'s light sensor, as "Adaptive brightness" on a stock Echo Show or Echo Spot does. That curve is dark: under about 5 lux the screen is barely lit, and it is near full brightness only from about 100 lux. If it is too dim for you, raise "Adaptive brightness adjustment", as you would move the slider on a stock Echo Show. Off by default (on an Echo Spot: on, as stock has it): the screen stays at "Screen brightness".' },
+  screen_brightness: { ha: true, help: 'How bright the screen is with adaptive brightness off. Default 47 %, what the Echo ran at before this setting existed (an Echo Spot: 50 %). With Kiosk Satellite installed, the Echo switches off the app\'s own adaptive brightness, so these settings set the screen.' },
   screen_brightness_adjust: { ha: true, help: 'With adaptive brightness on: Amazon\'s curve brighter (up to +100) or dimmer (down to −100), as the brightness slider moves it on a stock Echo Show in adaptive mode. At +100 a dark room\'s near-black screen is about as bright as 55 % without adaptive. 0 is Amazon\'s curve as it is.' },
   screen_adaptive_colour: { help: 'Amazon\'s "Adaptive Color" from a stock Echo Show\'s Display settings: the screen\'s white follows the room\'s light, warmer in lamplight, so at night the whole screen turns yellow. Off by default, so dashboard colours stay constant. The switch shows the device\'s current state; changes can take a few seconds. Amazon switches it off by itself while a video plays and back on after.' },
   ring_rotation: { ha: true, help: 'Where the light ring\'s fill starts. Home Assistant\'s "Light ring fill" lights that share of the ring in the light\'s colour, for a timer\'s or a washing machine\'s progress or a battery; it fills the way the volume does, from where the volume starts. Turn the start by this many LEDs, so it starts where you want it to for how the Echo stands. Only where the Echo has room for each LED\'s own animations (Home Assistant then lists "Light ring fill"). Default 0.' },
@@ -276,6 +276,14 @@ const HELP = {
   music_on_screen: { help: 'While a track from Music Assistant plays on this Echo, the screen shows the music page (the big cover, title, seek bar and buttons). In place of the face: only where the face is what the screen shows by itself; an app in front (Kiosk Satellite, a dashboard) is left alone. In place of the home app too: also over the app chosen as Home above (or Kiosk Satellite), which comes back when the music stops; other apps are left alone. A request, a call or a ringing timer bring the face as always, and the music page comes back when they are over. It stays until the music stops: a pause keeps it, and so does the gap between two tracks. It goes by itself only if it still shows the Playing tab: browse the library or search on it and it stays, as if opened by hand (Home in the drawer brings the home app back). Pull down the drawer and choose Face or Home, or tap the face button on the music page, and the music page stays away until the music has stopped; a face chosen that way stays as it always has, until Home in the drawer brings the home app back. Off by default.' },
   light_band: { help: 'The Echo Show has no light ring: it shows the ring\'s lights as a band along the bottom of the screen, as Alexa did. That is listening, thinking, mic off, calls, volume, timers and Home Assistant\'s "Light ring". This many pixels at the bottom are kept for it, so an app on the screen never has the band over it. 0 gives the whole screen to the apps and shows no band. Default 10, stock\'s line.' },
   round_clock: { help: 'The Echo Spot\'s round screen shows the time, large in the middle, and the date under it, white on black, with the light ring round the rim over them; the screen stays on while it does, as the Spot\'s own clock face did. 24h, or 12h with AM and PM. Off leaves the screen dark and lets it sleep five minutes after the last light. The time and its zone come from Home Assistant.' },
+  clock_face: { ha: true, thumbs: true, help: 'The Echo Spot\'s own analog clock faces, read from its firmware where they lie (nothing downloaded, nothing copied), drawn in place of the digital clock while the clock is on: the face Amazon made for each design, with its background, its hands and the second hand ticking. At night (Night mode: a dark room, or the hours set) the night version, dimmed as stock\'s was. Digital is hassmic\'s own clock. Also a select in Home Assistant.' },
+  clock_dial: { ha: true, pretty: true, empty: 'Pick one of the analog faces above first', help: 'The hands and dial of the face above: each design comes with up to four of its own (Beach: Tapered, Duotone, Bold), and this picks one of them. A new face starts at the one Amazon made its default. Also a select in Home Assistant, listing the face\'s own dials.' },
+  clock_background: { ha: true, thumbs: 'bg', empty: 'Pick one of the analog faces above first', help: 'The picture behind the face above: each design has three to ten of its own (Beach: Ocean, Grass, Leaves, Sand, Flower). The night version stays dark whichever you pick, as stock\'s did. A new face starts at its default background. Also a select in Home Assistant.' },
+  clock_date: { ha: true, help: 'The face\'s date window, with the day of the month in it, where the face has one (most do: at 9, at 3 or at 12 o\'clock). Off by default, as on a stock Spot. Also a switch in Home Assistant.' },
+  night_mode: { ha: true, help: 'Night, as stock\'s Night Mode: Automatic, when the room is dark (by the light sensor; where it reads nothing, by the hours below); Scheduled, between the hours below; Off, never. At night the clock faces show their night version and the screen dims, or goes off (Night clock). Also a select in Home Assistant.' },
+  night_from: { ha: true, help: 'When a scheduled night begins, by the half hour (and an automatic one where the light sensor reads nothing). Also a select in Home Assistant.' },
+  night_to: { ha: true, help: 'When a scheduled night ends. Also a select in Home Assistant.' },
+  night_clock: { ha: true, help: 'On: at night a dim clock stays on the screen. Off: the screen goes off for the night, and lights up only while the Echo shows something (the wake word, a reply, a timer), going off again 10 seconds after. Also a switch in Home Assistant.' },
   bluetooth_announcements: { help: 'Says "Connected to …" and "Disconnected from …" when a phone connects, in your voice assistant\'s voice, after the chime. Home Assistant speaks the words, and only once "Allow the device to perform Home Assistant actions" is ticked in this Echo\'s ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure); without it there is the chime only.' },
   bluetooth_announcement_language: { help: 'The language of those sentences. Home Assistant does not tell the Echo which language your voice assistant speaks, so pick the one that matches its voice.' },
   sendspin_unpaired: { help: 'Lets any Music Assistant server on the network play here without pairing. Off: only a server given this Echo\'s "Sendspin pairing token" (a diagnostic entity in Home Assistant) may play.' },
@@ -488,6 +496,14 @@ const SUB = {
   screen_timers: 'Running timers counted down, a ringing one in orange',
   screen_clock: 'The time and date in place of a dark screen',
   screen_sleep_minutes: 'Minutes until it goes dark or shows the clock; 0: never',
+  clock_face: 'Digital, or one of the Spot\'s own analog faces',
+  clock_dial: 'Which of the face\'s dials and hands',
+  clock_background: 'Which of the face\'s backgrounds',
+  night_mode: 'When it is night: a dark room, or set hours',
+  night_from: 'Scheduled: when the night begins',
+  night_to: 'Scheduled: when it ends',
+  night_clock: 'A dim clock at night, or the screen off',
+  clock_date: 'The day of the month in the face\'s date window',
   bluetooth_announcements: 'Says when a phone connects or disconnects',
   bluetooth_announcement_language: 'The language of those sentences',
   sendspin_unpaired: 'Any Music Assistant server may play here',
@@ -1104,7 +1120,24 @@ function control(s, prefix = 's-') {
     r.oninput = paint; r.onchange = () => set(s.name, r.value);
     return { el: h('div', { class: 'slider' }, r, out), update: (x) => { if (!r.matches(':active')) { r.value = x.value; paint(); } } };     // not while dragging
   }
-  const names = CHOICE_NAMES[s.name] || {}, modes = (HELP[s.name] || {}).modes;
+  const names = CHOICE_NAMES[s.name] || {}, modes = (HELP[s.name] || {}).modes, info = HELP[s.name] || {};
+  const pretty = (c) => c.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase());
+  const shown = (c) => names[c] || (info.pretty ? pretty(c) : c);
+  if (!s.choices.length && info.empty) return { el: h('p', { class: 'help' }, info.empty), update: () => {} };   // nothing to pick yet
+  if (info.thumbs === 'bg') {           // the face's backgrounds, each by its own picture (the face picked: choice i of clock_face)
+    const face = settingValueIndex('clock_face');
+    const btns = s.choices.map((c, i) => h('button', { type: 'button', class: 'face', title: pretty(c), onclick: () => set(s.name, c) },
+      h('span', { class: 'thumb' }, h('img', { src: `/api/clockface/${face}/bg/${i}`, alt: '', loading: 'lazy' })), h('span', {}, pretty(c))));
+    return { el: h('div', { class: 'faces', role: 'group', 'aria-label': s.label }, btns),
+             update: (x) => btns.forEach((b, i) => { b.classList.toggle('on', i === x.value); b.setAttribute('aria-pressed', String(i === x.value)); }) };
+  }
+  if (info.thumbs) {    // pictures to pick from: the clock faces, each as Amazon's own picker showed it
+    const btns = s.choices.map((c, i) => h('button', { type: 'button', class: 'face', title: pretty(c), onclick: () => set(s.name, c) },
+      i ? h('span', { class: 'thumb' }, h('img', { src: '/api/clockface/' + i, alt: '', loading: 'lazy' })) : h('span', { class: 'digital' }, '12:00'),
+      h('span', {}, i ? pretty(c) : 'Digital')));
+    return { el: h('div', { class: 'faces', role: 'group', 'aria-label': s.label }, btns),
+             update: (x) => btns.forEach((b, i) => { b.classList.toggle('on', i === x.value); b.setAttribute('aria-pressed', String(i === x.value)); }) };
+  }
   if (modes) {                          // choices worth weighing: a small card each, what each gives and costs one click away
     const cards = s.choices.map((c) => {
       const { before, after } = HELP[s.name] || {}, m = modeOf(modes, c);  // a dialog of the page's own before a choice counts
@@ -1141,14 +1174,14 @@ function control(s, prefix = 's-') {
   }
   if (s.choices.length <= 4) {
     const { before, unavailable } = HELP[s.name] || {};          // a dialog (or a file to pick) first; one this Echo lacks greyed out
-    const btns = s.choices.map((c) => h('button', { type: 'button', onclick: async () => { if (!before || await before(c)) set(s.name, c); } }, act(names[c] || c)));
+    const btns = s.choices.map((c) => h('button', { type: 'button', onclick: async () => { if (!before || await before(c)) set(s.name, c); } }, act(shown(c))));
     return { el: h('div', { class: 'seg', role: 'group', 'aria-label': s.label }, btns),
              update: (x) => btns.forEach((b, i) => {
                b.classList.toggle('on', i === x.value); b.setAttribute('aria-pressed', String(i === x.value));
                b.disabled = !!(unavailable && unavailable(s.choices[i])); b.title = b.disabled ? 'Not in this Echo\'s firmware' : '';
              }) };
   }
-  const sel = h('select', { id, onchange: () => set(s.name, sel.value) }, s.choices.map((c) => h('option', { value: c }, names[c] || c)));
+  const sel = h('select', { id, onchange: () => set(s.name, sel.value) }, s.choices.map((c) => h('option', { value: c }, shown(c))));
   return { el: sel, update: (x) => { sel.value = s.choices[x.value]; } };
 }
 
@@ -1620,8 +1653,9 @@ function buildVolumes(el) {
 }
 
 function render() {
-  // (the wake word engine's choices too: a wake plugin installed or removed is another card in its list)
-  const sig = state.settings.map((s) => s.name + (s.name === 'wake_engine' ? ':' + s.choices.join(',') : '')).join() + '|' + !!state.arbitration + '|' + !!state.kiosk_app + '|' + !!state.screen, fresh = sig !== built;
+  // (every setting's choices: a wake plugin installed or removed is another card in the wake word engine's list,
+  // and the clock face's dials and backgrounds are the face's own)
+  const sig = state.settings.map((s) => s.name + (s.choices ? ':' + s.choices.join('/') : '')).join() + '|' + !!state.arbitration + '|' + !!state.kiosk_app + '|' + !!state.screen, fresh = sig !== built;
   if (fresh) { built = sig; build(); }
   for (const s of state.settings) { const c = controls.get(s.name); if (c) c.update(s); }
   for (const q of quick) { const s = state.settings.find((x) => x.name === q.name); if (s) q.update(s); }

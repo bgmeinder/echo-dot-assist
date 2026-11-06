@@ -562,7 +562,27 @@ Beyond the README's two figures:
   the light "Light ring" show on it as on a Dot's ring. While Music Assistant plays on the Spot, the screen shows the
   cover, large, with the title and the artist under it, in place of the clock. "Clock on the screen" (off, 24h, 12h) puts the time, large,
   and the date on the screen inside the ring, white on black, and keeps the screen on; the time and its zone are
-  Home Assistant's.
+  Home Assistant's. "Clock face" (Lights, a picture of each; also a select in Home Assistant) swaps that digital clock
+  for one of the Spot's own analog faces, the ones Alexa's clock offered (Abstract shapes, Beach, Zen and the rest):
+  each design's own dials and backgrounds, a ticking second hand, and its night version (dimmed colours, the
+  background dark) when the Spot's light sensor says the room is dark. Under it, "Clock dial" picks one of the
+  design's dials (up to four: Beach has Tapered, Duotone and Bold), "Clock background" one of its backgrounds (three to
+  ten, each shown by its picture: Beach's Ocean, Grass, Leaves, Sand, Flower), and "Date on the clock face" shows the
+  day of the month in the face's date window, where it has one; all three are in Home Assistant too (the dial and
+  background selects list the face's own, so picking another face makes Home Assistant read the Echo's entities
+  again, which takes a few seconds). A new face starts at its own default dial and background. hassmic draws them from the
+  firmware's own clock-face package where it lies: nothing is downloaded or copied, and Alexa's clock app stays off.
+  Notifications and Alexa's alerts on the faces are left out, and so are Photos and the four
+  Wallpaper designs: their pictures came from Amazon's online services.
+  The screen's brightness and night are stock's Display and Night Mode settings (Lights, cards Screen and Night; all
+  in Home Assistant too). "Adaptive brightness" (on by default) follows the room by the light sensor, on the curve
+  Amazon made for the Spot, a few seconds after the light changes; "Adaptive brightness adjustment" then makes it
+  brighter or dimmer than that (0 is Amazon's curve itself), and with adaptive off "Screen brightness" is the level
+  (the same three settings as the Echo Shows'). "Night mode": Automatic
+  (default) makes it night while the room is dark, Scheduled between "Night starts" and "Night ends" (half hours,
+  21:00 to 07:00 to begin with; Automatic uses them too where the light sensor reads nothing), Off never. At night
+  the faces show their night version and, with "Night clock" on (default), the screen dims to a low glow; with it
+  off the screen goes dark, lights up for the wake word, a reply or a timer, and goes dark again 10 seconds after.
 - **Microphone off** plays Alexa's own sounds. A switch that is already off when hassmic starts is shown, not announced.
 - **Wake sound**: Alexa's own where the firmware has it; the Echo Show 8 1st gen has none and plays hassmic's short blip
   (or one of your own: "Your own sounds", below). On the Echo Show 8 (1st and 2nd gen), the Show 5 2nd gen and the Echo Input a sound
@@ -828,7 +848,7 @@ Bluetooth audio from phones, the Bluetooth speaker and the setup from a phone (I
 | Wake sound | the wake sound only, on or off; off keeps the one you chose |
 | Equalizer | bass, mid, treble, −6 to +6 dB, Amazon's own, on everything the Echo plays |
 | LED auto brightness, LED brightness | a level holds the ring there and switches the automatic off (Echo Show 5: the band's brightness, no automatic) |
-| Adaptive brightness, Screen brightness, Adaptive brightness adjustment | Echo Show: the screen's backlight, see [The screen](#the-screen-echo-show) |
+| Adaptive brightness, Screen brightness, Adaptive brightness adjustment | Echo Show and Echo Spot: the screen's backlight, see [The screen](#the-screen-echo-show) |
 | Timer ringing, Ringing timers | on while a finished timer rings; their names (diagnostic), see [Voice](#voice) |
 | Stop ringing | button: ends a ringing timer and nothing else |
 | Next timer, Next timer name, Next timer length | the running timer that ends first: when (timestamp), its name, the length it was set for (s); unknown while none runs, see [Voice](#voice) |

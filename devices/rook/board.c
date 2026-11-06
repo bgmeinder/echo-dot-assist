@@ -8,8 +8,8 @@
 /* No earcon folder in this firmware: stock's sounds are resources of its apps, stored uncompressed (sounds.c reads
  * them out of the APKs).  The same names as crown's, in other apps: the controls' in SystemUI (not KnightSystemUI),
  * Bluetooth's in KnightSettings, the calls' in the comms app (com.amazon.comms.rooktachyon beside it has the
- * reactions only), the timer's and the alarm's in the alarms app.  No setup beacon found in any app (the built-in
- * tone stands in); the wake sound is below. */
+ * reactions only), the timer's and the alarm's in the alarms app.  No wake sound or setup beacon found in any app
+ * (verify: as crown, the built-in tones stand in). */
 #define SYUI "/system/priv-app/SystemUI/SystemUI.apk"
 #define KSET "/system/priv-app/KnightSettings/KnightSettings.apk"
 #define COMM "/system/priv-app/com.amazon.comms.multimodaltachyonarm/com.amazon.comms.multimodaltachyonarm.apk"
@@ -72,10 +72,23 @@ const struct board board = {
     .earcon_dir = "/data/local/hassmic/earcon/",                    /* none of stock's: own sounds here win over the apps' */
     .earcon_zip = sounds,
     .thermal_type = "mtktscpu",
-    /* an ALS behind MediaTek's alsps framework (m_alsps_input), no libacehal_ambientLightSensor and no lux file under
-     * /sys/bus/platform/drivers/als_ps on this kernel: none until one is found (verify) */
-    .light_sensor = { NULL },
+    /* a TI OPT3001 on I2C 0-0044 (driver opt300x, MediaTek's "alsps"), through IIO: calibrated lux as text, world-readable
+     * (0.22 in a dark room, 2026-11-06); the stable path, not the iio:device number's own */
+    .light_sensor = { "/sys/bus/i2c/devices/0-0044/iio:device0/in_illuminance_input", NULL },
+    /* behind the Spot's dark glass it reads 0.55-0.57 in a lit room and 0 with the lights off (2026-11-06, a two-minute
+     * recording): dark under 0.1, light again over 0.3 */
+    .lux_dark = 0.1f,
+    .lux_poll = 1,                                                  /* the driver converts for ~800 ms at each read */
     .screen_round = 1,                                              /* the ring drawn around the rim of the round screen (ring_band.c) */
+    /* the Spot's clock-face package: Amazon's analog faces as data (templates, faces, backgrounds) and their art,
+     * read where it lies (clockface.c); stock's clock app that drew them is Alexa's and stays off */
+    .clock_faces = "/system/priv-app/com.amazon.selector.clock.resources/com.amazon.selector.clock.resources.apk",
+    .clock_faces_pkg = "com.amazon.selector.clock.resources",
+    /* framework-res's curve (lux 4..60000 -> 50..255, 1 at 0 lux) and dumpsys display's max gamma 10.  Android's
+     * light sensor (MTK's "LIGHT" HAL) read 127-128 lux while the OPT3001's file read 6.39-6.41 (2026-11-06, five
+     * samples): 20 times; Android's own adaptive mode took the backlight to 8 at 0.22 lux with the slider at -0.32,
+     * which this curve gives at 4.4 */
+    .backlight_curve = &(const struct board_backlight){ 20, 10, 7, { 4, 25, 45, 65, 100, 200, 60000 }, { 1, 50, 180, 225, 245, 250, 252, 255 } },
     .volume_steps = 100,                                            /* the light band (ring_band.c) shows the level in % */
     /* volume curve not measured on this model yet: the Echo Dot 2's stands in (devices/README.md: how to measure) */
     .volume_curve = board_vol_dot2,
