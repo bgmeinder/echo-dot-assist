@@ -3116,6 +3116,20 @@ Run in this order. Each step says what it proves.
       so HA's Illuminance is not comparable with other sensors.  A scale factor (a board field multiplying what
       core_lux reads, lux_dark then on the true scale) from one reading beside a reference (a phone's light meter on
       the Spot's top, or a sensor in the same room) with the lights on.
+      adb over Wi-Fi (2026-11-06): never listened on rook.  The gate worked (boot.log "adb over Wi-Fi OPEN", the
+      property 5555, adbd restarted, 5555 refused rather than dropped from the PC), but the restarted adbd held only
+      127.0.0.1:5037; its trace (persist.adb.trace_mask) went from usb_init straight to jdwp, no local_init, and its
+      banner had no ro.product.*.  The XDA adbd is static with Android 7's bionic: libselinux's selinux_android_setcon
+      (0x2ab08, called for --root_seclabel) runs __system_properties_init again, which re-checks each context's
+      access as /dev/__properties__/<name>; on 5.1 that is one file, the legacy area fails the check and is unmapped
+      (adbd's maps: gone, fd 8 still open), so everything read after the switch is empty (the trace mask and
+      ro.secure are read before it).  The raw area and a trie walk on the PC read 5555 fine.  Fix: device.conf
+      ADBD_PATCH, mkbootroot.py --adbd-patch (old bytes checked): setcon's tail call into the init becomes "return
+      0", 8 bytes; the image built from it differs from the installed one in those bytes of sbin/adbd only.  Not
+      `--root_seclabel` dropped: adbd's shells would go to the enforcing shell domain.  crown, checkers, cronos ship
+      the same adbd unpatched: their property area is a directory.  On Master (2026-11-06, written with dd from root
+      adb, rebooted): `adb devices -l` with product:rook model:AEORK; adb-wifi.sh opened it, `adb connect` a root shell
+      in u:r:su:s0 over Wi-Fi; the window ended early (hassmic.adb.until 0): port 0, no listener, connect dropped.
       (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
       does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
       HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.

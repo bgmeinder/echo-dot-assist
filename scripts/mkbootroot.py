@@ -2,7 +2,7 @@
 """mkbootroot: a rooted boot.img from the device's own stock one, in the standard library only.
 
   mkbootroot.py --check BOOT.img            prove the rebuild: stock image in, the same out but for the ID
-  mkbootroot.py BOOT.img OUT.img [--sepolicy FILE] [--adbd FILE] [--no-verity]
+  mkbootroot.py BOOT.img OUT.img [--sepolicy FILE] [--adbd FILE [--adbd-patch OFF:OLD:NEW]...] [--no-verity]
                 [--prop KEY=VALUE]... [--add NAME=FILE]... [--import NAME]...
                                             build the rooted image
   mkbootroot.py --extract BOOT.img NAME OUT a file of the ramdisk (e.g. sepolicy, to patch it)
@@ -38,6 +38,12 @@ In the ramdisk:
   in it: "adbd cannot run as root in production builds"), which drops to shell whatever
   ro.secure, service.adb.root or the FOS flags say (all three tried on a checkers, 2026-10-10);
   the XDA image's adbd (CyanogenMod's, static) goes by ro.secure, and with it adb is root in su
+- with --adbd-patch OFF:OLD:NEW (hex; OFF a file offset): those bytes of that adbd, which must read OLD there.
+  rook (Android 5.1): the XDA adbd's own bionic is Android 7's, and libselinux's selinux_android_setcon calls
+  __system_properties_init again after the switch into su; on 5.1's one-file property area (no directory
+  /dev/__properties__) that second call unmaps the area, and every property read after it is empty: the
+  ro.product.* of its banner and service.adb.tcp.port, so adb over Wi-Fi never listened (2026-11-06, Master: the
+  area gone from adbd's maps, fd still open).  device.conf ADBD_PATCH skips that call (setcon's result 0 returned)
 - init.*.rc: stock's "setprop service.adb.tcp.port 5555" (checkers' init.checkers.rc, on boot) left out, as a
   comment line in its place.  With the changes above it opened a root shell without authentication to the network at
   every boot, until lockdown.sh closed it again; adb over Wi-Fi is hassmic's to open (adb_gate in lockdown.sh).
@@ -316,6 +322,15 @@ def main(argv):
         i = argv.index("--adbd")
         assert i + 1 < len(argv), "--adbd needs a file"
         adbd = open(argv[i + 1], "rb").read()
+        del argv[i:i + 2]
+    while "--adbd-patch" in argv:
+        i = argv.index("--adbd-patch")
+        assert i + 1 < len(argv) and adbd is not None, "--adbd-patch needs OFF:OLD:NEW and --adbd"
+        off, old, new = argv[i + 1].split(":")
+        off, old, new = int(off, 0), bytes.fromhex(old), bytes.fromhex(new)
+        assert len(old) == len(new), "--adbd-patch: OLD and NEW differ in length"
+        assert adbd[off:off + len(old)] == old, "--adbd-patch: adbd does not read %s at %#x" % (old.hex(), off)
+        adbd = adbd[:off] + new + adbd[off + len(new):]
         del argv[i:i + 2]
     while "--sepolicy" in argv:
         i = argv.index("--sepolicy")

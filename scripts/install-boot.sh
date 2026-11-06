@@ -65,7 +65,9 @@ boot_image() {
         die "the patched policy lacks its rules ($OUT/sepolicy.rules.txt)"
     # BOOT_PROPS (device.conf): lines for default.prop (rook: ro.build.tags=test-keys, or stock's fosflags script strips adb);
     # BOOT_RC: hassmic.rc into the ramdisk, imported by init.rc, where init reads no /system/etc/init/ (Android 5.1)
+    # ADBD_PATCH: byte patches of that adbd (rook: its property area kept; mkbootroot.py says why)
     python3 scripts/mkbootroot.py $OUT/boot.stock.img $IMG --sepolicy $OUT/sepolicy.hassmic --adbd $ADBD --no-verity \
+        $(for p in $ADBD_PATCH; do printf ' --adbd-patch %s' "$p"; done) \
         $(for p in $BOOT_PROPS; do printf ' --prop %s' "$p"; done) \
         ${BOOT_RC:+--add hassmic.rc=$DDIR/hassmic.rc --import hassmic.rc} > /dev/null
     echo "boot image: $IMG ($(sha $IMG | cut -c1-16)...)"

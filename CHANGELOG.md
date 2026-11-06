@@ -4,6 +4,10 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-11-06
 
+- **Echo Spot: adb over Wi-Fi works.** Opening debug access from the settings page (or `scripts/adb-wifi.sh`) said
+  it was open, but the Spot never let adb connect: the adb it runs could not read its own settings. The boot image
+  now carries a fixed one; a Spot installed before this needs its boot image written again (`scripts/install-boot.sh
+  --boot-only`, over USB).
 - **Echo Spot: its own analog clock faces.** "Clock face" (settings page, Lights, with a picture of each; and a select
   in Home Assistant) puts one of the Spot's 22 analog faces from Alexa's clock in place of the digital clock: its
   background, its dial and its hands, the second hand ticking, and the dimmed night version when the room is dark. The
