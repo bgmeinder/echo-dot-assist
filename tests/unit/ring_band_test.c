@@ -21,6 +21,7 @@ int core_muted(void) { return muted; }
 int core_dnd(int set) { (void)set; return dnd_on; }
 static int brightness = 100;
 int core_led_brightness(int set) { (void)set; return brightness; }
+int https_open(const char *url) { (void)url; return -1; }   /* ring_band.c's artwork fetch: none here */
 void core_spawn(char *const argv[])
 {
     if (!strcmp(argv[0], "/system/bin/service") && !strcmp(argv[3], "9")) spawns_wake++;

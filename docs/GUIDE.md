@@ -419,6 +419,12 @@ Beyond the README's two figures:
   the side that faces the talker in the middle, never turned (the settings page draws and edits them that way on
   these models, and Apply shows them at once). A design made on a Dot works on the band and the other way round;
   the designer's Ring / Band switch shows a design either way on any Echo.
+- **Echo Spot (2017)**: its screen is round, so the same lights run around its rim as a ring, as thick as "Light
+  band" says (10 pixels), over whatever the screen shows; the side facing the talker is at the bottom. Designs and
+  the light "Light ring" show on it as on a Dot's ring. While Music Assistant plays on the Spot, the screen shows the
+  cover, large, with the title and the artist under it, in place of the clock. "Clock on the screen" (off, 24h, 12h) puts the time, large,
+  and the date on the screen inside the ring, white on black, and keeps the screen on; the time and its zone are
+  Home Assistant's.
   The volume of voice replies shows in cyan, as on the Dots. The screen wakes for the band and sleeps 5 minutes after the last light (1 minute with
   the microphones off or in Do not disturb).
 - **Microphone off** plays Alexa's own sounds. A switch that is already off when hassmic starts is shown, not announced.

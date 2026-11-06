@@ -71,4 +71,13 @@ int  ring_rotation(int set);                /* LEDs the fill's start is turned b
  * all the apps'); -1 where the ring is LEDs.  set < 0 reads. */
 void ring_level(int dbfs10);
 int  ring_band_rows(int set);
+/* the clock on a round screen (board.screen_round; setting screen_clock): 0 off, 1 24 h, 2 12 h; set < 0 reads.
+ * Drawn by the band's renderer under the ring, the screen kept awake while it shows */
+int  ring_band_clock(int set);
+/* what plays, from Sendspin: shown on a round screen in place of the clock while it plays (ring_band.c); the cover a
+ * JPEG, n 0 none.  ring_shows_music: whether this model shows it (Sendspin then asks for metadata and artwork) */
+int  ring_shows_music(void);
+void ring_music_meta(const char *title, const char *artist);
+void ring_music_playing(int playing);
+void ring_music_art(const void *image, size_t n);
 #endif

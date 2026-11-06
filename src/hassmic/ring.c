@@ -1098,7 +1098,12 @@ void ring_reload(void)
 void ring_light_get(struct ring_light *l) { pthread_mutex_lock(&lock); *l = light; pthread_mutex_unlock(&lock); }
 
 void ring_level(int dbfs10) { (void)dbfs10; }       /* the LEDs' listening ring does not follow the voice */
+int  ring_shows_music(void) { return 0; }                                       /* no screen */
+void ring_music_meta(const char *t, const char *a) { (void)t; (void)a; }
+void ring_music_playing(int p) { (void)p; }
+void ring_music_art(const void *i, size_t n) { (void)i; (void)n; }
 int  ring_band_rows(int set) { (void)set; return -1; }
+int  ring_band_clock(int set) { (void)set; return 0; }       /* no screen here */
 
 void ring_light_set(const struct ring_light *l, unsigned flash_ms)
 {

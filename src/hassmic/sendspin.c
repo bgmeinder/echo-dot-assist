@@ -45,6 +45,7 @@
 #include "board.h"
 #include "btout.h"
 #include "core.h"
+#include "ring.h"
 #include "hash.h"
 #include "netio.h"
 #include "noise.h"
@@ -57,6 +58,18 @@
 #define DR_FLAC_NO_STDIO
 #define DR_FLAC_NO_OGG
 #include "../third_party/dr_flac.h"
+
+/* What plays goes to whatever shows it: the Echo Shows' screen UI (screen.h) and a round screen's ring (ring_band.c, the
+ * Echo Spot: the cover and the words in place of its clock).  shows_music: whether this model has either, so whether
+ * metadata@v1 and artwork@v1 are asked for; the controller and Music Assistant's pages stay the screen UI's */
+static int shows_music(void) { return screen_present() || ring_shows_music(); }
+static void show_meta(const char *t, const char *a, const char *al) { screen_music_meta(t, a, al); ring_music_meta(t, a); }
+static void show_progress(int state, long long pos, long long dur, int speed)
+{
+    screen_music_progress(state, pos, dur, speed); ring_music_playing(state == 1);
+}
+static void show_art(const void *img, size_t n) { screen_music_art(img, n); ring_music_art(img, n); }
+static void show_gone(void) { screen_music_gone(); ring_music_meta("", ""); ring_music_art(NULL, 0); ring_music_playing(0); }
 
 /* libopus: linked from the stock firmware on the device, from the system on the PC.  Only these three calls are used. */
 typedef struct OpusDecoder OpusDecoder;
@@ -653,7 +666,7 @@ static void send_state_vol(struct session *s, int vol)
               available ? "true" : "false", vol, atomic_load(&player_muted) ? "true" : "false",
               s->spec ? "output_delay_ms" : "static_delay_ms", atomic_load(&static_delay_ms), LEAD_MS, LEAD_MS,
               s->spec ? "\"volume\",\"mute\",\"set_output_delay\"" : "\"set_static_delay\"",
-              s->spec && screen_present() ? ",\"artwork\":{\"channels\":[{\"source\":\"album\",\"format\":\"jpeg\",\"width\":400,\"height\":400}]}" : "");
+              s->spec && shows_music() ? ",\"artwork\":{\"channels\":[{\"source\":\"album\",\"format\":\"jpeg\",\"width\":400,\"height\":400}]}" : "");
     s->state_sent = 1; s->available_sent = available;
 }
 
@@ -678,7 +691,7 @@ static void art_tick(struct session *s)
     uint8_t *img = NULL; size_t n = 0; int show = s->due_on && raw_us() >= s->due_at;
     if (show) { img = s->due; n = s->due_n; s->due = NULL; s->due_n = 0; s->due_on = 0; }
     pthread_mutex_unlock(&s->art_lock);
-    if (show && s->admitted) screen_music_art(img, n);
+    if (show && s->admitted) show_art(img, n);
     free(img);
 }
 
@@ -753,7 +766,7 @@ static int arbitrate(struct session *s)
         admitted = s; s->admitted = 1;
     }
     pthread_mutex_unlock(&adm_lock);
-    if (gone) screen_music_gone();                      /* the old server's track: the new one tells its own */
+    if (gone) show_gone();                              /* the old server's track: the new one tells its own */
     if (!win) { fprintf(stderr, "sendspin: second server turned away, the current one is busier\n"); goodbye(s, "concurrent_attempt"); }
     return win;
 }
@@ -784,10 +797,10 @@ static const char *formats_json(void)
 static void music_progress(struct session *s, int state)
 {
     if (state == 1 && s->m_known && !s->m_speed) state = 2;
-    if (!s->m_known) { screen_music_progress(state, 0, 0, 1000); return; }
+    if (!s->m_known) { show_progress(state, 0, 0, 1000); return; }
     long long pos = s->m_pos + (state == 1 ? (raw_us() - s->m_at) / 1000 * s->m_speed / 1000 : 0);
     if (s->m_dur > 0 && pos > s->m_dur) pos = s->m_dur;
-    screen_music_progress(state, pos, s->m_dur, s->m_speed);
+    show_progress(state, pos, s->m_dur, s->m_speed);
 }
 
 /* "key": present (a string or null: 1, out set, "" for null) or left out (0) */
@@ -813,7 +826,7 @@ static void meta_apply(struct session *s, const char *j, long long t_recv)     /
         /* "metadata": null: nothing plays any more (aiosendspin 10's set_metadata(None)) */
         if (js_field(j, "metadata", none, sizeof none) && (s->m_title[0] || s->m_artist[0] || s->m_album[0] || s->m_known)) {
             s->m_title[0] = s->m_artist[0] = s->m_album[0] = 0; s->m_known = 0;
-            screen_music_meta("", "", ""); music_progress(s, 0);
+            show_meta("", "", ""); music_progress(s, 0);
         }
         return;
     }
@@ -825,7 +838,7 @@ static void meta_apply(struct session *s, const char *j, long long t_recv)     /
         if (js_field(sec, k[i], f[i], sizeof s->m_title)) changed = 1;
         else if (s->spec && f[i][0]) { f[i][0] = 0; changed = 1; }
     }
-    if (changed) screen_music_meta(s->m_title, s->m_artist, s->m_album);
+    if (changed) show_meta(s->m_title, s->m_artist, s->m_album);
     if (js_section(sec, "progress", prog, sizeof prog)) {
         js_i64(sec, "timestamp", &ts);
         long long at = ts && tf_synced(NULL) ? tf_client_time(ts) : t_recv;
@@ -871,7 +884,7 @@ static void meta_gone(struct session *s)
     pthread_mutex_lock(&s->meta_lock);
     free(s->meta_due); s->meta_due = NULL;
     s->m_title[0] = s->m_artist[0] = s->m_album[0] = 0; s->m_known = 0;
-    screen_music_meta("", "", ""); music_progress(s, 0);
+    show_meta("", "", ""); music_progress(s, 0);
     pthread_mutex_unlock(&s->meta_lock);
 }
 
@@ -879,7 +892,7 @@ static void art_gone(struct session *s)
 {
     s->art_on = 0; free(s->art_in); s->art_in = NULL;
     pthread_mutex_lock(&s->art_lock); free(s->due); s->due = NULL; s->due_n = 0; s->due_on = 0; pthread_mutex_unlock(&s->art_lock);
-    screen_music_art(NULL, 0);
+    show_art(NULL, 0);
 }
 
 /* The address of a paired server that holds the player role here: the screen's music pages (mass.c) suggest Music
@@ -917,7 +930,7 @@ static void on_json(struct session *s, char *j, long long t_recv)
          * 9.1.1 shapes are what that library requires, and what marks a client as its dialect for 10.x.  Forced: 9.1.1
          * asks for it again after a re-handshake, before its server/activate (1.0 does not ask).  A model with a screen
          * also takes the track's metadata and its cover (screen.h). */
-        int scr = screen_present();
+        int scr = shows_music();
         send_json_forced(s, NULL, "{\"type\":\"client/hello\",\"payload\":{\"name\":\"%s\",\"device_info\":{\"product_name\":\"%s\","
                      "\"manufacturer\":\"Amazon\",\"software_version\":\"" VERSION "\"},\"supported_roles\":[\"player@v1\",\"controller@v1\"%s],"
                      "\"player@v1_support\":{\"supported_formats\":[%s],\"buffer_capacity\":%u%s},%s"
@@ -959,8 +972,8 @@ static void on_json(struct session *s, char *j, long long t_recv)
             s->player_active = on;
             int ctl = strstr(sec, "controller@v1") != NULL, meta = strstr(sec, "metadata@v1") != NULL, art = strstr(sec, "artwork@v1") != NULL;
             if (!ctl) { s->ctl_commands[0] = 0; s->group_playing = 0; }      /* its server/state goes with it */
-            if (screen_present()) {                                          /* and what the screen showed of it */
-                if (s->controller_active && !ctl) screen_music_controller(0, 0, "", NULL, -1);
+            if (screen_present() && s->controller_active && !ctl) screen_music_controller(0, 0, "", NULL, -1);
+            if (shows_music()) {                                             /* and what the screen showed of it */
                 if (s->meta_role && !meta) meta_gone(s);
                 if (s->art_role && !art) art_gone(s);
             }
@@ -1024,7 +1037,7 @@ static void on_json(struct session *s, char *j, long long t_recv)
                 screen_music_controller((int)vol, (int)mu, list, rep[0] ? rep : NULL, sh < 0 ? -1 : sh != 0);
             }
         }
-        if (screen_present() && s->admitted) on_metadata(s, j, t_recv);
+        if (shows_music() && s->admitted) on_metadata(s, j, t_recv);
     } else if (!strcmp(type, "stream/start")) {
         if (!s->player_active || !js_section(j, "player", sec, sizeof sec)) return;
         static char hdr64[1024]; static uint8_t hdr[768]; long hl = 0;
@@ -1042,11 +1055,11 @@ static void on_json(struct session *s, char *j, long long t_recv)
     } else if (!strcmp(type, "stream/end")) {
         int all = !js_section(j, "roles", sec, sizeof sec);
         if (all || strstr(sec, "player")) { stream_set(0); q_flush(); fprintf(stderr, "sendspin: stream end\n"); }
-        if (s->spec && s->admitted && screen_present() && (all || strstr(sec, "artwork"))) art_gone(s);   /* 1.0: its images with it (9.1.1 ends every track) */
+        if (s->spec && s->admitted && shows_music() && (all || strstr(sec, "artwork"))) art_gone(s);   /* 1.0: its images with it (9.1.1 ends every track) */
     } else if (!strcmp(type, "group/update")) {
         if (js_str(j, "playback_state", str, sizeof str)) {
             s->group_playing = !strcmp(str, "playing"); fprintf(stderr, "sendspin: group %s\n", str);
-            if (screen_present() && s->admitted) {
+            if (shows_music() && s->admitted) {
                 pthread_mutex_lock(&s->meta_lock); music_progress(s, !strcmp(str, "playing") ? 1 : !strcmp(str, "paused") ? 2 : 0); pthread_mutex_unlock(&s->meta_lock);
             }
         }
@@ -1122,7 +1135,7 @@ static int on_message(struct session *s, uint8_t *m, size_t len, long long t_rec
         if (n) q_push(ts, pcm, n);
     } else if (m[0] == 8 && s->admitted) {      /* album art, channel 0 */
         if (s->spec) on_artwork(s, m, len);
-        else if (len >= 9) screen_music_art(len > 9 ? m + 9 : NULL, len - 9);    /* 9.1.1: int64 time, the image (none: cleared) */
+        else if (len >= 9) show_art(len > 9 ? m + 9 : NULL, len - 9);    /* 9.1.1: int64 time, the image (none: cleared) */
     }
     return 1;                                   /* other ids: roles we do not have, ignored */
 }
@@ -1186,7 +1199,7 @@ static void *serve(void *arg)
     if (was) { admitted = NULL; stream_set(0); q_flush(); }
     for (int i = 0; i < 16; i++) if (live[i] == s) live[i] = NULL;
     pthread_mutex_unlock(&adm_lock);
-    if (was) screen_music_gone();
+    if (was) show_gone();
     ws_close(&s->ws); pthread_mutex_destroy(&s->send_lock); pthread_mutex_destroy(&s->art_lock); pthread_mutex_destroy(&s->meta_lock);
     fprintf(stderr, "sendspin: session closed\n");
     free(plain); free(s->frag); free(s->art_in); free(s->due); free(s->meta_due); free(s);
@@ -1345,7 +1358,7 @@ int sendspin_unpaired(int set)
         struct session *s = admitted; int gone = 0;
         if (s && s->psk_cat != PSK_LONGTERM && !s->pairing && !s->closing) { s->admitted = 0; admitted = NULL; stream_set(0); q_flush(); goodbye(s, "pairing_required"); gone = 1; }
         pthread_mutex_unlock(&adm_lock);
-        if (gone) screen_music_gone();
+        if (gone) show_gone();
     }
     return set != 0;
 }

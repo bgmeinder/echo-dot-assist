@@ -20,6 +20,9 @@
  *            for root to install, Apply shows them at once.  Flattened, never turned (no beam to follow): cut open
  *            opposite where stock's listening ring points at turn 0, so the side facing the talker is in the middle, as
  *            in the patterns.  The page gets the patterns as files (ring_stock) to start designs from.
+ *   ring     a round screen (board.screen_round, the Echo Spot's 480x480): the same strip, but the renderer's ring mode
+ *            lays it around the rim as a ring light_band px thick (a table from send_table, sent once), the talker's
+ *            side at the bottom.  A band along the bottom of a round screen is a sliver under the bezel (2026-11-05).
  *   screen  stock's power policy (EnvironmentContextService, ECStateMachine): the screen sleeps 5 min after the last
  *            activity, 1 min with the mic off or in Do not disturb; a pattern wakes it (IPowerManager.wakeUp, through the
  *            service tool: transaction 9, isInteractive 12 on 8149, checked on the first Echo Show).  An app in front
@@ -215,6 +218,7 @@ static struct { long long at; int arg, on, ms; } act[P_COUNT];     /* ms: how lo
 static struct ring_light light = { .on = 0, .brightness = 1, .color_brightness = 1, .r = 1, .g = 1, .b = 1, .effect = E_NONE, .fill = 100 }, flash;
 static long long flash_until;
 static int rows = 10, wake_req, started;
+static int ring_mode, screen_w, screen_h;       /* the renderer in its ring mode (a round screen), and the screen's size */
 
 static int find(const char *pattern, int *arg)
 {
@@ -418,9 +422,30 @@ static void light_draw(const struct ring_light *l, int blink, struct rgb *led, l
 
 static void run_quiet(char *const argv[]) { core_spawn(argv); }
 
+static int sdk_level(void)
+{
+#ifdef __ANDROID__
+    static int sdk = -1;
+    if (sdk < 0) { char v[PROP_VALUE_MAX] = ""; sdk = __system_property_get("ro.build.version.sdk", v) > 0 ? atoi(v) : 0; }
+    return sdk;
+#else
+    return 0;
+#endif
+}
+
 static void screen_wake(void)
 {
-    char ms[24]; snprintf(ms, sizeof ms, "%lld", now_ms());           /* uptimeMillis is CLOCK_MONOTONIC */
+    long long t = now_ms();                                             /* uptimeMillis is CLOCK_MONOTONIC */
+    char ms[24], lo[16], hi[16];
+    snprintf(ms, sizeof ms, "%lld", t);
+    snprintf(lo, sizeof lo, "%u", (unsigned)(t & 0xffffffffu)); snprintf(hi, sizeof hi, "%u", (unsigned)(t >> 32));
+    if (sdk_level() && sdk_level() < 23) {
+        /* Android 5.1's service tool has no i64: a long is eight bytes in the parcel, two i32 (rook, 2026-11-05) */
+        char *wake[] = { "/system/bin/service", "call", "power", "9", "i32", lo, "i32", hi, "s16", "hassmic", "s16", "android", NULL };
+        char *act_[] = { "/system/bin/service", "call", "power", "8", "i32", lo, "i32", hi, "i32", "0", "i32", "0", NULL };
+        run_quiet(wake); run_quiet(act_);
+        return;
+    }
     char *wake[] = { "/system/bin/service", "call", "power", "9", "i64", ms, "s16", "hassmic", "s16", "android", NULL };
     char *act_[] = { "/system/bin/service", "call", "power", "8", "i64", ms, "i32", "0", "i32", "0", NULL };   /* userActivity */
     run_quiet(wake); run_quiet(act_);
@@ -448,14 +473,54 @@ static const char *dex_path(void)
 
 /* Android 8 and later (athena's 9) have no SurfaceControl constructor: the renderer is told to use SurfaceControl.Builder
  * (tools/mkringbar.py, argv[2]).  The PC has no properties and the old way, as the test's stand-in expects. */
-static int builder_api(void)
+static int builder_api(void) { return sdk_level() >= 26; }
+
+/* The ring of a round screen (board.screen_round): the renderer's ring mode draws a clear layer over the whole screen
+ * and copies the strip we send (the band's frame, w x rows) onto the rim through a table sent once: for every pixel
+ * of the ring (outer radius R = half the screen's shorter side, inner R - rows) its strip pixel, by angle and depth.
+ * The strip's left end is at the top, it runs clockwise; the middle, the talker's side in every pattern, is at the
+ * bottom; the ends meet at the top.  The strip is as long as the ring's middle circumference, so every pixel of it
+ * shows about once.  Written as the renderer reads it (tools/mkringbar.py): 3 ints, then (layer pixel, strip pixel)
+ * pairs, little-endian; a write that fails ends the renderer like a frame's.  Returns the strip's width, 0 on failure */
+static int send_table(int fd, int sw, int sh, int rows)
 {
-#ifdef __ANDROID__
-    char v[PROP_VALUE_MAX] = "";
-    return __system_property_get("ro.build.version.sdk", v) > 0 && atoi(v) >= 26;
-#else
-    return 0;
-#endif
+    int side = sw < sh ? sw : sh;
+    if (rows > side / 2) rows = side / 2;
+    float cx = sw / 2.f, cy = sh / 2.f, R = side / 2.f, Rin = R - rows;
+    int W = (int)lroundf(2 * (float)M_PI * (R - rows / 2.f));
+    if (W > MAX_W) W = MAX_W;
+    if (W < 1 || rows < 1) return 0;
+    uint32_t *tab = malloc((size_t)sw * sh * 2 * sizeof *tab + 12);
+    if (!tab) return 0;
+    uint32_t n = 0;
+    for (int y = 0; y < sh; y++)
+        for (int x = 0; x < sw; x++) {
+            float dx = x + 0.5f - cx, dy = y + 0.5f - cy, r = sqrtf(dx * dx + dy * dy);
+            if (r < Rin || r >= R) continue;
+            int row = (int)(R - r);                              /* 0 at the rim */
+            if (row >= rows) row = rows - 1;
+            float a = atan2f(dx, -dy);                           /* 0 at the top, clockwise, +-pi at the bottom */
+            if (a < 0) a += 2 * (float)M_PI;                     /* 0..2pi clockwise from the top: the strip's ends meet there */
+            int col = (int)(a / (2 * (float)M_PI) * W);
+            if (col >= W) col = W - 1;
+            if (col < 0) col = 0;
+            tab[3 + 2 * n] = (uint32_t)(y * sw + x); tab[4 + 2 * n] = (uint32_t)(row * W + col); n++;
+        }
+    tab[0] = (uint32_t)W; tab[1] = (uint32_t)rows; tab[2] = n;
+    uint8_t *b = (uint8_t *)tab; size_t len = (3 + 2 * (size_t)n) * 4;
+    for (size_t i = 0; i < len; i += 4) {                        /* little-endian, whatever the host */
+        uint32_t v = tab[i / 4]; b[i] = v & 255; b[i + 1] = v >> 8 & 255; b[i + 2] = v >> 16 & 255; b[i + 3] = v >> 24;
+    }
+    size_t off = 0;
+    while (off < len) {
+        ssize_t r = write(fd, b + off, len - off);
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) { free(tab); return 0; }
+        off += (size_t)r;
+    }
+    free(tab);
+    fprintf(stderr, "band: a ring of %d px around the %d x %d screen, %u pixels, the strip %d wide\n", rows, sw, sh, n, W);
+    return W;
 }
 
 #define VIA_SCREEN -2                   /* "fd" of the screen UI's band (screen_band) */
@@ -495,11 +560,13 @@ static int ringbar(int n, int *in, int *w)
     long maxfd = sysconf(_SC_OPEN_MAX);
     if (maxfd < 0 || maxfd > 65536) maxfd = 65536;
     /* what to run, made before the fork too: after it only async-signal-safe calls (execve, not execle) */
-    char *argv_[7] = { NULL }; const char *prog;
-    if (fake) { prog = fake; argv_[0] = (char *)fake; argv_[1] = rs; }
+    int ring = board.screen_round;
+    char *argv_[8] = { NULL }; const char *prog;
+    if (fake) { prog = fake; argv_[0] = (char *)fake; argv_[1] = rs; argv_[2] = ring ? "ring" : NULL; }
     else {
         prog = "/system/bin/app_process";
-        argv_[0] = "app_process"; argv_[1] = "/"; argv_[2] = "Ringbar"; argv_[3] = rs; argv_[4] = builder ? "builder" : NULL;
+        argv_[0] = "app_process"; argv_[1] = "/"; argv_[2] = "Ringbar"; argv_[3] = rs;
+        argv_[4] = builder ? "builder" : "ctor"; argv_[5] = ring ? "ring" : NULL;
     }
     if (pipe2(pin, O_CLOEXEC)) { free(envp); return -1; }
     if (pipe2(pout, O_CLOEXEC)) { close(pin[0]); close(pin[1]); free(envp); return -1; }
@@ -528,13 +595,42 @@ static int ringbar(int n, int *in, int *w)
     line[k] = 0; close(pout[0]);
     int ww = 0, hh = 0;
     if (!strcmp(line, "off") && !n) { close(pin[1]); *w = 0; *in = -1; return 0; }
-    if (sscanf(line, "ready %d %d", &ww, &hh) != 2 || ww <= 0 || ww > MAX_W || hh != n) {
+    if (sscanf(line, "ready %d %d", &ww, &hh) != 2 || ww <= 0 || (ring ? hh <= 0 : ww > MAX_W || hh != n)) {
         fprintf(stderr, "band: the renderer did not come up (%s): %s\n", line[0] ? line : "no answer", dex);
         close(pin[1]); return -1;
     }
+    if (ring) {                                     /* "ready <screen w> <screen h>": the table goes first */
+        int sw = send_table(pin[1], ww, hh, n);
+        if (!sw) { fprintf(stderr, "band: the ring's table could not be sent\n"); close(pin[1]); return -1; }
+        *in = pin[1]; *w = sw; ring_mode = 1; screen_w = ww; screen_h = hh;
+        return 0;
+    }
+    ring_mode = 0;
     *in = pin[1]; *w = ww;
     fprintf(stderr, "band: %d x %d at the bottom of the screen\n", ww, hh);
     return 0;
+}
+
+static int write_all(int fd, const void *data, size_t len)
+{
+    const uint8_t *b = data; size_t off = 0;
+    while (off < len) {
+        ssize_t r = write(fd, b + off, len - off);
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) return -1;
+        off += (size_t)r;
+    }
+    return 0;
+}
+
+/* The ring mode's messages (tools/mkringbar.py): 5 little-endian ints, kind, a, b, c, n, then n bytes.  0: a strip
+ * frame; 1: the text cleared; 2: text, drawn centred, baseline a, size b px, colour c */
+static int send_msg(int fd, int kind, int a, int b, int c, const void *payload, size_t n)
+{
+    uint8_t h[20]; int v[5] = { kind, a, b, c, (int)n };
+    for (int i = 0; i < 5; i++) { uint32_t u = (uint32_t)v[i]; h[4 * i] = u & 255; h[4 * i + 1] = u >> 8 & 255; h[4 * i + 2] = u >> 16 & 255; h[4 * i + 3] = u >> 24; }
+    if (write_all(fd, h, sizeof h)) return -1;
+    return n ? write_all(fd, payload, n) : 0;
 }
 
 static int send_frame(int fd, const struct rgb *row, int w, int n, float k)
@@ -547,13 +643,140 @@ static int send_frame(int fd, const struct rgb *row, int w, int n, float k)
     }
     if (fd == VIA_SCREEN) return screen_band(buf, w);          /* one row: the UI repeats it; -1: the UI was given up */
     for (int y = 1; y < n; y++) memcpy(buf + (size_t)y * w * 4, buf, (size_t)w * 4);
-    size_t len = (size_t)w * n * 4, off = 0;
-    while (off < len) {
-        ssize_t r = write(fd, buf + off, len - off);
-        if (r < 0 && errno == EINTR) continue;
-        if (r <= 0) return -1;
-        off += (size_t)r;
+    size_t len = (size_t)w * n * 4;
+    if (ring_mode) return send_msg(fd, 0, 0, 0, 0, buf, len);
+    return write_all(fd, buf, len);
+}
+
+/* The clock on a round screen (setting screen_clock, ring_band_clock): the time large in the middle, the date under
+ * it, white on the dark screen, as the renderer's text messages, once a minute and again whenever the renderer
+ * starts or the mode changes; the screen kept awake meanwhile (stock's Spot shows its clock face all day).  12 h as
+ * "7:05 PM", 24 h as "19:05"; the date "Wednesday, November 5" (the C locale's English; the zone is the Echo's, from
+ * Home Assistant through clock.c).  clock_shown: the mode drawn (-1: nothing yet, a fresh renderer) */
+static int clock_mode, clock_shown = -1, clock_minute = -1;
+
+int ring_band_clock(int set)
+{
+    pthread_mutex_lock(&lock);
+    if (set >= 0 && set <= 2 && set != clock_mode) { clock_mode = set; pthread_cond_signal(&cv); }
+    int r = clock_mode;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
+static int clock_tick(int fd)                   /* -1: the renderer is gone */
+{
+    pthread_mutex_lock(&lock); int mode = clock_mode; pthread_mutex_unlock(&lock);
+    time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
+    int minute = tm.tm_hour * 60 + tm.tm_min;
+    if (mode == clock_shown && (!mode || minute == clock_minute)) return 0;
+    if (!mode) {
+        if (clock_shown > 0 && send_msg(fd, 1, 0, 0, 0, NULL, 0)) return -1;
+        clock_shown = 0; return 0;
     }
+    char tim[32], date[64], wd[24], mon[24];
+    if (mode == 2) snprintf(tim, sizeof tim, "%d:%02d %s", tm.tm_hour % 12 ? tm.tm_hour % 12 : 12, tm.tm_min, tm.tm_hour < 12 ? "AM" : "PM");
+    else snprintf(tim, sizeof tim, "%02d:%02d", tm.tm_hour, tm.tm_min);
+    strftime(wd, sizeof wd, "%A", &tm); strftime(mon, sizeof mon, "%B", &tm);
+    snprintf(date, sizeof date, "%s, %s %d", wd, mon, tm.tm_mday);
+    int h = screen_h, big = mode == 2 ? h * 21 / 100 : h * 30 / 100;        /* "12:45 PM" is the widest; the chord at the time's height */
+    if (send_msg(fd, 1, 0, 0, 0, NULL, 0) || send_msg(fd, 2, h * 58 / 100, big, (int)0xFFF2F2F2u, tim, strlen(tim))
+        || send_msg(fd, 2, h * 70 / 100, h * 75 / 1000, (int)0xFF9A9A9Au, date, strlen(date))) return -1;
+    if (mode != clock_shown) fprintf(stderr, "band: the clock on the screen, %s\n", mode == 2 ? "12 h" : "24 h");
+    /* the screen kept on: Android 5.1's settings tool writes no screen_off_timeout (Amazon keeps the screen rows
+     * elsewhere), so the timeout set above does not reach the power manager there; a userActivity every minute
+     * does, with stock's 5 min (1 min muted or in Do not disturb: still within) */
+    screen_wake();
+    clock_shown = mode; clock_minute = minute;
+    return 0;
+}
+
+/* What plays, from Music Assistant over Sendspin (sendspin.c: metadata@v1, and artwork@v1's cover as a JPEG): on a
+ * round screen in place of the clock while it plays, the cover large in the middle (decoded by the renderer's
+ * BitmapFactory: nothing to decode in C), the title and the artist under it.  np.ver counts changes; the band thread
+ * redraws when it moved.  lock guards np */
+#define ART_MAX (2 << 20)
+static struct { char title[160], artist[160]; int playing; unsigned ver; uint8_t *art; size_t artlen; } np;
+static unsigned np_shown;                        /* np.ver on the screen; band thread only */
+static int np_on;                                /* the screen shows what plays (not the clock); band thread only */
+
+int ring_shows_music(void) { return board.screen_round; }      /* the Echo Shows' band has no room for it */
+
+void ring_music_meta(const char *title, const char *artist)
+{
+    if (!board.screen_round) return;
+    pthread_mutex_lock(&lock);
+    snprintf(np.title, sizeof np.title, "%s", title ? title : "");
+    snprintf(np.artist, sizeof np.artist, "%s", artist ? artist : "");
+    np.ver++;
+    pthread_cond_signal(&cv);
+    pthread_mutex_unlock(&lock);
+}
+
+void ring_music_playing(int playing)
+{
+    if (!board.screen_round) return;
+    pthread_mutex_lock(&lock);
+    if (np.playing != !!playing) { np.playing = !!playing; np.ver++; pthread_cond_signal(&cv); }
+    pthread_mutex_unlock(&lock);
+}
+
+void ring_music_art(const void *image, size_t n)
+{
+    if (!board.screen_round) return;
+    uint8_t *copy = n && n <= ART_MAX ? malloc(n) : NULL;
+    if (copy) memcpy(copy, image, n);
+    pthread_mutex_lock(&lock);
+    free(np.art); np.art = copy; np.artlen = copy ? n : 0; np.ver++;
+    pthread_cond_signal(&cv);
+    pthread_mutex_unlock(&lock);
+}
+
+/* at most max characters of UTF-8 text, an ellipsis where it was cut */
+static void fit(char *out, size_t cap, const char *in, int max)
+{
+    size_t n = 0; int chars = 0;
+    for (const char *p = in; *p; ) {
+        size_t k = 1; while ((p[k] & 0xc0) == 0x80) k++;   /* one character */
+        if (chars == max) { if (n + 4 <= cap) { memcpy(out + n, "\xe2\x80\xa6", 3); n += 3; } break; }
+        if (n + k + 4 > cap) break;
+        memcpy(out + n, p, k); n += k; p += k; chars++;
+    }
+    out[n] = 0;
+}
+
+/* -1: the renderer is gone.  Draws what plays when it changed; the screen kept on while it does */
+static int np_tick(int fd)
+{
+    static int minute = -1;
+    pthread_mutex_lock(&lock);
+    unsigned ver = np.ver;
+    if (ver == np_shown && np_on) {
+        pthread_mutex_unlock(&lock);
+        time_t t = time(NULL); int m = (int)(t / 60);
+        if (m != minute) { minute = m; screen_wake(); }
+        return 0;
+    }
+    char title[160], artist[160]; uint8_t *art = NULL; size_t artlen = np.artlen;
+    fit(title, sizeof title, np.title, 24); fit(artist, sizeof artist, np.artist, 26);
+    if (np.art && (art = malloc(artlen))) memcpy(art, np.art, artlen);
+    pthread_mutex_unlock(&lock);
+    int h = screen_h, r = 0;
+    r |= send_msg(fd, 1, 0, 0, 0, NULL, 0);
+    if (art) {    /* 288 of 480, its top at 29: big, its upper corners cut by the round screen (bigger read better than
+                   * all of it seen, 2026-11-05); the two lines under it where the screen is still 345+ px wide */
+        r |= send_msg(fd, 3, h * 6 / 100, h * 60 / 100, 0, art, artlen);
+        r |= send_msg(fd, 2, h * 745 / 1000, h * 58 / 1000, (int)0xFFF2F2F2u, title, strlen(title));
+        r |= send_msg(fd, 2, h * 82 / 100, h * 46 / 1000, (int)0xFF9A9A9Au, artist, strlen(artist));
+    } else {                                      /* no picture (yet): the words in the middle */
+        r |= send_msg(fd, 2, h * 50 / 100, h * 75 / 1000, (int)0xFFF2F2F2u, title, strlen(title));
+        r |= send_msg(fd, 2, h * 60 / 100, h * 55 / 1000, (int)0xFF9A9A9Au, artist, strlen(artist));
+    }
+    free(art);
+    if (r) return -1;
+    if (!np_on) fprintf(stderr, "band: now playing on the screen\n");
+    np_shown = ver; np_on = 1; minute = -1;
+    screen_wake();
     return 0;
 }
 
@@ -571,7 +794,7 @@ static void *band_thread(void *arg)
         long long now = now_ms();
         if (now >= next_check) {                    /* stock's screen timeouts by what the Echo is doing (first: also
                                                        while a renderer is awaited) */
-            int t = core_muted() || core_dnd(-1) ? QUIET_MS : TIMEOUT_MS;
+            int t = ring_mode && fd >= 0 && ring_band_clock(-1) ? 2147483647 : core_muted() || core_dnd(-1) ? QUIET_MS : TIMEOUT_MS;   /* the clock: never */
             if (t != timeout) { timeout = t; screen_timeout(t); }
             next_check = now + 1000;
         }
@@ -597,7 +820,7 @@ static void *band_thread(void *arg)
                 pthread_mutex_unlock(&lock);
                 continue;
             }
-            fails = 0; have_rows = want;
+            fails = 0; have_rows = want; clock_shown = -1; clock_minute = -1; np_on = 0; np_shown = 0;   /* a fresh renderer: all again */
             if (!want) fprintf(stderr, "band: off, the whole screen is the apps'\n");
         }
         struct rgb led[LEDS];
@@ -625,6 +848,16 @@ static void *band_thread(void *arg)
             if (rows == have_rows && !wake_req) pthread_cond_timedwait(&cv, &lock, &ts);
             pthread_mutex_unlock(&lock);
             continue;
+        }
+        int showing_np;
+        pthread_mutex_lock(&lock); showing_np = ring_mode && np.playing && (np.title[0] || np.art); pthread_mutex_unlock(&lock);
+        if (ring_mode && !showing_np && np_on) {    /* it stopped: the clock (or nothing) again */
+            np_on = 0; clock_shown = -1; clock_minute = -1;
+            if (send_msg(fd, 1, 0, 0, 0, NULL, 0)) { close(fd); fd = -1; have_rows = -1; sleep(1); continue; }
+        }
+        if (ring_mode && (showing_np ? np_tick(fd) : clock_tick(fd)) < 0) {
+            fprintf(stderr, "band: the renderer is gone, starting it again\n");
+            close(fd); fd = -1; have_rows = -1; sleep(1); continue;
         }
         int lv = atomic_load(&level_db);            /* the talker: -50 dBFS nothing, -20 the widest */
         float target = clamp01((lv / 10.f + 50) / 30);

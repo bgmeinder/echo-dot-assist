@@ -16,6 +16,7 @@
  */
 #include "ringdesign.h"
 #include "ring.h"
+#include "board.h"
 #include "statefile.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -337,9 +338,10 @@ size_t rd_status_json(char *out, size_t cap)
     slot_ids(applied, applied_ids);         /* which design each slot has on the ring: the installed designs */
     int same = applied ? draft && an == dn && !memcmp(applied, draft, an) : draft && dn == sizeof APPLIED_HEAD - 1;
     const char *st = waiting ? "installing" : last_error[0] ? "failed" : !same ? "pending" : "applied";
-    sput(&b, "{\"installed\":%s,\"band\":%s,\"band_on\":%s,\"leds\":%d,\"max\":%d,\"frames_max\":%d,\"state\":\"%s\",\"error\":",
+    /* round: the band runs around the rim of a round screen (rook; ring_band.c): the page draws designs as a ring there */
+    sput(&b, "{\"installed\":%s,\"band\":%s,\"band_on\":%s,\"round\":%s,\"leds\":%d,\"max\":%d,\"frames_max\":%d,\"state\":\"%s\",\"error\":",
          ring_custom() ? "true" : "false", ring_band_rows(-1) >= 0 ? "true" : "false", ring_band_rows(-1) > 0 ? "true" : "false",
-         ring_leds(), RD_MAX, RD_FRAMES, st);
+         ring_band_rows(-1) >= 0 && board.screen_round ? "true" : "false", ring_leds(), RD_MAX, RD_FRAMES, st);
     jstr(&b, last_error);
     sput(&b, ",\"slots\":[");
     for (int i = 0; i < ring_nslots; i++)

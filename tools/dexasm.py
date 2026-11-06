@@ -145,7 +145,7 @@ class Code:
             b"".join(struct.pack("<H", u if isinstance(u, int) else tables.index(u)) for u in units)
 
 
-AGET_OBJ, APUT_OBJ, APUT_BYTE = 0x46, 0x4d, 0x4f
+AGET, AGET_OBJ, APUT, APUT_OBJ, APUT_BYTE = 0x44, 0x46, 0x4b, 0x4d, 0x4f
 VIRT, DIRECT, STATIC, IFACE, STATIC_RANGE = 0x6e, 0x70, 0x71, 0x72, 0x77
 ADD, SUB, MUL, AND, OR, SHL = 0x90, 0x91, 0x92, 0x95, 0x96, 0x98
 ADD8, MUL8, OR8, SHL8, USHR8 = 0xd8, 0xda, 0xde, 0xe0, 0xe2
@@ -443,7 +443,7 @@ def build(prog, codes):
 # Every opcode the writer emits: format, and what the verifier below makes of it.  Anything else is refused.
 OPS = {0x01: "12x", 0x07: "12x", 0x0a: "11x", 0x0c: "11x", 0x0e: "10x", 0x0f: "11x", 0x11: "11x",
        0x12: "11n", 0x13: "21s", 0x14: "31i", 0x1a: "21c", 0x1f: "21c", 0x21: "12x", 0x22: "21c", 0x23: "22c",
-       0x29: "20t", 0x46: "23x", 0x4d: "23x", 0x4f: "23x", 0x62: "21c", 0x77: "3rc", 0x8d: "12x"}
+       0x29: "20t", 0x44: "23x", 0x46: "23x", 0x4b: "23x", 0x4d: "23x", 0x4f: "23x", 0x62: "21c", 0x77: "3rc", 0x8d: "12x"}
 OPS.update({op: "22t" for op in range(0x32, 0x38)})
 OPS.update({op: "21t" for op in range(0x38, 0x3e)})
 OPS.update({op: "35c" for op in (0x6e, 0x70, 0x71, 0x72)})
@@ -585,14 +585,20 @@ def verify(name, units, nregs, ins, outs, params, ret, ids):
             t = get(o[0])
             assert is_int(t) or (op in (0x38, 0x39) and is_ref(t)), f"{here}: tests {t}"
             branch = o[1]
-        elif op in (0x46, 0x4d, 0x4f):
+        elif op in (0x44, 0x46, 0x4b, 0x4d, 0x4f):
             v, arr, idx = o
             need_int(idx)
             t = need_ref(arr)
             assert t != "0", f"{here}: array access on null"
             comp = t[1][1:]
             assert t[1][0] == "[", f"{here}: v{arr} is {t[1]}, not an array"
-            if op == 0x46:
+            if op == 0x44:
+                assert comp == "I", f"{here}: aget from {t[1]}"
+                put(v, "I")
+            elif op == 0x4b:
+                assert comp == "I", f"{here}: aput into {t[1]}"
+                need_int(v)
+            elif op == 0x46:
                 assert comp[0] in "L[", f"{here}: aget-object from {t[1]}"
                 put(v, ("R", comp))
             elif op == 0x4d:

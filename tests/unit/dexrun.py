@@ -55,8 +55,8 @@ class JCtor:
 
 
 class JField:
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, name, cls=None):
+        self.name, self.cls = name, cls
 
 
 class ByteOrder:
@@ -175,6 +175,9 @@ class JavaEnv:
     def static_call(self, cls, name, args):
         raise AssertionError(f"{cls}.{name}: no static method faked")
 
+    def static_field(self, cls, name):
+        raise AssertionError(f"{cls}.{name}: no static field faked")
+
     def call(self, key, args):
         """the java.* methods, by dexasm's METHODS key"""
         a = args
@@ -206,13 +209,15 @@ class JavaEnv:
         if key == "cls.getf":
             known = {n for c, n, t in self.prog.reflected_fields if c in self.listed_as(a[0])}
             assert a[1] in known, f"{a[0].name}.{a[1]}: not in the program's reflected fields"
-            return JField(a[1])
+            return JField(a[1], a[0])
         if key == "obj.getcls": return self.jclass(a[0])
         if key == "obj.tostr": return self.jstr(a[0])
         if key == "obj.eq": return a[0] is a[1] or a[0] == a[1] and type(a[0]) is type(a[1])
         if key == "m.invoke": return self.invoke(a[0], a[1], list(a[2]))
         if key == "m.setacc": return None
-        if key == "f.get": return getattr(a[1], a[0].name)
+        if key == "f.get":
+            if a[1] is None or isinstance(a[1], Zero): return self.static_field(a[0].cls.name, a[0].name)   # get(null): a static field
+            return getattr(a[1], a[0].name)
         if key == "f.set":
             old = getattr(a[1], a[0].name)
             assert type(old) is type(a[2]) or old is None or (isinstance(old, bool) and isinstance(a[2], bool)), \
@@ -298,7 +303,8 @@ class Dex:
                 a = r[o[0]]
                 a = 0 if a is None else (1 if not isinstance(a, int) else a)
                 if [a == 0, a != 0, a < 0, a >= 0, a > 0, a <= 0][op - 0x38]: nxt = at + o[1]
-            elif op == 0x46: r[o[0]] = r[o[1]][r[o[2]]]
+            elif op in (0x44, 0x46): r[o[0]] = r[o[1]][r[o[2]]]
+            elif op == 0x4b: r[o[1]][r[o[2]]] = int(r[o[0]])
             elif op == 0x4d:                                    # aput-object: a const 0 stored is null
                 v = r[o[0]]
                 r[o[1]][r[o[2]]] = None if isinstance(v, Zero) else v

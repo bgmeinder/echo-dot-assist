@@ -21,6 +21,7 @@ int core_muted(void) { return 0; }
 int core_dnd(int set) { (void)set; return 0; }
 int core_led_brightness(int set) { (void)set; return 100; }
 void core_spawn(char *const argv[]) { (void)argv; }
+int https_open(const char *url) { (void)url; return -1; }   /* ring_band.c's artwork fetch: none here */
 int main(void)
 {
     int s = slot_of(P_THINK), c; static struct rgb row[%d]; struct rgb led[LEDS];
@@ -34,12 +35,39 @@ int main(void)
     }
 }
 """ % (W, W, W)
+# the round screen's table (send_table, into a file): "W rows n" then "pixel strip" pairs, as the renderer reads them
+table_harness = r"""
+#include "ring_band.c"
+const struct board board = { .volume_steps = 100, .screen_round = 1 };
+int core_muted(void) { return 0; }
+int core_dnd(int set) { (void)set; return 0; }
+int core_led_brightness(int set) { (void)set; return 100; }
+void core_spawn(char *const argv[]) { (void)argv; }
+int https_open(const char *url) { (void)url; return -1; }   /* ring_band.c's artwork fetch: none here */
+int main(int argc, char **argv)
+{
+    int fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int W = send_table(fd, atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
+    close(fd);
+    return W > 0 ? 0 : 1;
+}
+"""
+import struct
+SCREEN, ROWS = 480, 10
 with tempfile.TemporaryDirectory() as tmp:
     src, exe = os.path.join(tmp, "band_map.c"), os.path.join(tmp, "band_map")
     open(src, "w").write(harness)
     subprocess.run(["cc", "-O2", "-w", f"-I{ROOT}/src/hassmic", src, f"{ROOT}/src/hassmic/ringdesign.c", f"{ROOT}/src/hassmic/statefile.c", f"{ROOT}/src/hassmic/screen_none.c",
                     "-lm", "-lpthread", "-o", exe], check=True)
     out = subprocess.run([exe], input=" ".join(str(v) for d in designs for c in d for v in c), capture_output=True, text=True, check=True).stdout
+    src2, exe2, tab = os.path.join(tmp, "table.c"), os.path.join(tmp, "table"), os.path.join(tmp, "table.bin")
+    open(src2, "w").write(table_harness)
+    subprocess.run(["cc", "-O2", "-w", f"-I{ROOT}/src/hassmic", src2, f"{ROOT}/src/hassmic/ringdesign.c", f"{ROOT}/src/hassmic/statefile.c", f"{ROOT}/src/hassmic/screen_none.c",
+                    "-lm", "-lpthread", "-o", exe2], check=True)
+    subprocess.run([exe2, tab, str(SCREEN), str(SCREEN), str(ROWS)], check=True, stderr=subprocess.DEVNULL)
+    raw = open(tab, "rb").read()
+    c_W, c_rows_n, c_n = struct.unpack("<3I", raw[:12])
+    c_table = dict(struct.iter_unpack("<2I", raw[12:12 + 8 * c_n]))        # layer pixel -> strip pixel
 c_rows = [list(map(int, l.split())) for l in out.split("\n") if l]
 
 js = r"""
@@ -63,9 +91,16 @@ const extra = {
   move: Array.from({ length: n }, (_, p) => JSON.stringify(at(fn("rotPx")(px, 1), p)) === JSON.stringify(at(px, (p + n - 1) % n))).every(Boolean),
   rainbow: (() => { const w = ctx.wheelPx(n, true); return JSON.stringify(w[(0 + 5) % n]) === '[255,0,0]' && JSON.stringify(w[(2 + 5) % n]) === '[255,255,0]'; })(),
 };
-console.log(JSON.stringify({ rows, extra }));
+// the round screen: every pixel's strip pixel by the page's roundMap, as a flat list [pixel, row * W + col, ...]
+const round = [];
+for (let y = 0; y < t.screen; y++) for (let x = 0; x < t.screen; x++) { const m = ctx.roundMap(x, y, t.screen, t.screen, t.rows); if (m) round.push(y * t.screen + x, m[0] * m[2] + m[1], m[2]); }
+// the round hit test: cell p's middle, clockwise from the top at the rim, paints LED p + 5; the centre nothing
+const rhit = Array.from({ length: n }, (_, p) => { const a = (p + 0.5) * 2 * Math.PI / n; return ctx.roundCellAt(0.5 + 0.47 * Math.sin(a), 0.5 - 0.47 * Math.cos(a), n) === (p + 5) % n; }).every(Boolean)
+  && ctx.roundCellAt(0.5, 0.5, n) === -1;
+const rcss = ctx.frameCss(px, true, true);
+console.log(JSON.stringify({ rows, extra, round, rhit, rconic: rcss.startsWith('conic-gradient(') }));
 """
-r = subprocess.run(["node", "-e", js, f"{ROOT}/web/ring.js"], input=json.dumps({"designs": designs, "w": W}), capture_output=True, text=True)
+r = subprocess.run(["node", "-e", js, f"{ROOT}/web/ring.js"], input=json.dumps({"designs": designs, "w": W, "screen": SCREEN, "rows": ROWS}), capture_output=True, text=True)
 if r.returncode: sys.exit(f"node: {r.stderr.strip()}")
 res = json.loads(r.stdout)
 js_rows = [px for d in res["rows"] for px in d]
@@ -80,4 +115,15 @@ words = {"thumbs": "the frame strip's thumbnails: cell p shows LED p + 5", "hit"
          "mirror": "Mirror: left to right on the band", "move": "Move right / Run: one cell to the right, round to the other end",
          "rainbow": "Rainbow on the band: red at the left end, yellow two cells on"}
 for k, v in res["extra"].items(): print(f"{'ok  ' if v else 'FAIL'} {words[k]}")
-sys.exit(0 if ok and mid == ([255, 0, 0], [0, 255, 0]) and all(res["extra"].values()) else 1)
+# the round screen: the page's roundMap against send_table's table, pixel for pixel (the C in float, the page in double:
+# a pixel on a boundary may land one strip pixel over, so those count apart only beyond one)
+js_table = {res["round"][i]: res["round"][i + 1] for i in range(0, len(res["round"]), 3)}
+js_W = res["round"][2] if res["round"] else 0
+off = [(p, a, js_table.get(p)) for p, a in c_table.items() if js_table.get(p) is None or (abs(js_table[p] - a) > 1 and abs(js_table[p] - a) not in (c_W - 1, c_W))]
+extra_js = len(set(js_table) - set(c_table))
+rok = c_W == js_W == 1477 and len(c_table) == len(js_table) and not off and not extra_js
+print(f"{'ok  ' if rok else 'FAIL'} the round screen: the page's ring and send_table's, {len(c_table)} pixels of {SCREEN}x{SCREEN}, "
+      f"the strip {c_W} wide" + ("" if rok else f" (page W {js_W}, {len(js_table)} pixels, {len(off)} apart, {extra_js} extra; first {off[:2]})"))
+print(f"{'ok  ' if res['rhit'] else 'FAIL'} the round hit test: cell p from the top clockwise paints LED p + 5, the centre nothing")
+print(f"{'ok  ' if res['rconic'] else 'FAIL'} the round screen's thumbnails: a conic gradient")
+sys.exit(0 if ok and mid == ([255, 0, 0], [0, 255, 0]) and all(res["extra"].values()) and rok and res["rhit"] and res["rconic"] else 1)

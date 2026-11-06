@@ -2499,6 +2499,14 @@ Run in this order. Each step says what it proves.
       WIFI_DRIVER), stock's as .pre-hassmic.  make kernel-tools fetches tree, compiler and driver by commit
       (kernel-tools.sh: a .git URL is a repository and a commit); two builds byte-identical.  Cold boot: loaded at
       16 s, the Spot's MAC, PM 2 kept by the driver.
+- [x] Now playing on the Spot's screen (2026-11-05/06).  Upstream's metadata@v1 and artwork@v1 (sendspin.c, for the
+      Echo Shows' screen.c) feed the round screen as well: shows_music() = screen_present() || ring_shows_music() asks
+      for the roles, show_meta/show_progress/show_art/show_gone hand what plays to screen.h and to ring_band.c's
+      ring_music_* (round screens only; the controller and Music Assistant's pages stay screen.c's).  The cover comes
+      as artwork@v1's 400 x 400 JPEG, up to 2 MB, into the renderer's message 3 (an image: BitmapFactory.decodeByteArray,
+      drawn as a square of b px at top a, centred, through a FILTER_BITMAP paint); layout 288 px from the top at 29,
+      title (24 chars) and artist (26) under it; in place of the clock while playing, the clock back when it stops;
+      userActivity each minute meanwhile.  Seen on the Spot with an audiobook cover.
 - [x] Frozen at the first wake word after 18.6 h (2026-10-13, GitHub issue #31; Echo Dot 3 on 2026.10.12.210015, up
       ~24 h): wake word, wake sound, listening ring, then nothing; buttons dead (action logged, not acted on), no
       pipeline timeout, power cycle needed. HA ran a whole pipeline meanwhile. The log's last hassmic lines: `whisper:

@@ -57,6 +57,8 @@ struct board {
                                        a TCS3400 under <dir>/input*, main.c lux_tcs3400 */
     const char *jack_state;         /* the headphone jack's switch ("0" out, "1"/"2" in): main.c sets headphone_volume % of
                                        the volume while headphones are in and puts the speaker's back after; NULL: none */
+    int screen_round;               /* 1: a round screen (rook): ring_band.c draws the light ring as a ring at the rim,
+                                       light_band = its thickness, instead of a band along the bottom (ringbar's ring mode) */
     int volume_steps;               /* volume_step-NN animations of ledcontroller */
     /* LEDs the light really shows, where that is fewer than stock's animations draw (12): 1 = one RGB LED that shows the
      * first of each frame (the Echo Input's LP5562): nothing turned towards the talker, no LED's own layer (ring.c).

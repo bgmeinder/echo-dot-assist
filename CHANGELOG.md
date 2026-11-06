@@ -11,6 +11,12 @@ What changed for people using the Echo, newest first. Details and measurements a
   turns out locked after the unlock, it points to the issue before anyone runs the unlock again.
 - **Bluetooth music on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry every few
   seconds where the phone's packets arrive unevenly.
+- **Echo Spot: a clock on the screen.** "Clock on the screen" (settings page, Lights: off, 24h or 12h) shows the time
+  large in the middle of the Spot's round screen and the date under it, white on black, the light ring round the rim
+  over them; the screen stays on while the clock shows. The time and its zone are Home Assistant's.
+- **Echo Spot: what plays, on the screen.** While Music Assistant plays on the Spot, its round screen shows the album
+  or book cover, large, with the title and the artist under it; the clock comes back when it stops. Music Assistant
+  tells it what plays and sends the cover over Sendspin, as it does for the Echo Shows' screen.
 - **Echo Spot: headphones at a gentler volume, and Music Assistant.** Plugging headphones into the Spot's 3.5 mm jack
   turns the volume down to 75 % of what it was ("Headphone volume" on the settings page) and unplugging puts it back;
   the Spot learns of the plug from the kernel, nothing polls. The Spot plays in Music Assistant once paired with its
@@ -28,6 +34,12 @@ What changed for people using the Echo, newest first. Details and measurements a
   Let's Encrypt's root: Amazon's libcurl there was built to look for its certificates in a Linux file the Echo does
   not have. hassmic now tells libcurl where the Echo's own store is and brings Let's Encrypt's two roots along
   (`cacerts.pem`, next to the binary), so "Check HTTPS certificates" can stay on everywhere.
+- **Echo Spot 1st gen: the light ring around the screen.** The Spot's screen is round, and the Echo Shows' light
+  band along its bottom edge landed under the bezel. The lights now run around the rim as a ring, as thick as the
+  page's "Light band" says, the talker's side at the bottom; designs and Home Assistant's "Light ring" show on it
+  as on a Dot. (`ringbar.dex` has a ring mode: a clear layer over the whole screen and a table that lays the band's
+  strip around the rim, sent once.) The settings page draws and edits designs for the Spot the same way: round, the
+  designer's second view is "Screen" there, and the frame thumbnails are rings.
 
 ## 2026-11-04
 
