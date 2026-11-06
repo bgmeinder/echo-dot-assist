@@ -2426,7 +2426,19 @@ Run in this order. Each step says what it proves.
       takes self-signed. fake_ha_esphome (`HASSMIC_CA_FILE` = a test CA): WAV, MP3 and a redirect over HTTPS with a
       CA-signed certificate, self-signed refused, taken with the setting off (persisted), unreachable reports failure.
       Device (biscuit, 2026-10-13, announcements over its ESPHome API): raw.githubusercontent.com MP3 with checks on
-      played; a self-signed server refused (curl 60), played with `https_verify=off`.  Open: a real HA over HTTPS.
+      played; a self-signed server refused (curl 60), played with `https_verify=off`.  A real HA over HTTPS (Let's
+      Encrypt) from the Spot, 2026-11-05: refused at first, "cannot be authenticated with given CA certificates": not a
+      missing root (rook's store has ISRG Root X1) but libcurl's own default CA file, compiled in as a Linux path,
+      /etc/ssl/certs/ca-certificates.crt, which the Echo has not, so curl 7.50.1 there checked against nothing.  Now
+      https.c, update.c and davs.c set CAPATH = /system/etc/security/cacerts (hashed by OpenSSL's old subject hash, which
+      its by_dir lookup tries) and CAINFO = cacerts.pem next to the binary (scripts/device/: ISRG Root X1 and X2, 3.3 kB,
+      shipped with every model: CAINFO must exist or OpenSSL refuses the lot); `https_ca_file`/`https_ca_path`.  The
+      announcement then played with the check on.  Correction, same day: CAPATH never worked on rook (the store's
+      files are named by the old subject hash, its OpenSSL looks up the new one; "Download from Amazon" failed
+      "HTTP 0" at api.amazon.com, DigiCert Global Root G2).  https_ca_file now writes state/cacerts.bundle.pem: every
+      PEM of the store plus cacerts.pem, rewritten only when it differs, as CAINFO; nothing set where no store is (the
+      PC: libcurl's default, never narrowed).  Certificates naming eMudhra are never taken (DISTRUSTED; none in
+      rook's 164 roots).  tests/unit/ca_bundle_test.sh (make unit-ca_bundle).
 - [x] Bluetooth on a UART (rook, 2026-11-05).  The Spot's BCM43569 sits on /dev/ttyMT1 (bluetooth:radio 0660; the
       kernel has no Bluetooth stack), unpatched it answers nothing useful.  bt_uart.c (board bt_dev "uart:<tty>",
       bt_patch, bt_baud, bt_mac) does libbt-vendor's sequence: 115200 RTS/CTS, HCI_Reset, Update_Baudrate 0xFC18 to

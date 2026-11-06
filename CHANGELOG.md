@@ -11,6 +11,14 @@ What changed for people using the Echo, newest first. Details and measurements a
   turns out locked after the unlock, it points to the issue before anyone runs the unlock again.
 - **Bluetooth music on every Echo: fewer gaps.** A phone's music no longer drifts out of step and runs dry every few
   seconds where the phone's packets arrive unevenly.
+- **The certificates trusted, in one place.** hassmic now gathers the Echo's own certificate store and its Let's
+  Encrypt roots into one file and checks HTTPS against that (on the Spot, the store's file names hid Amazon's root
+  from its libcurl). Certificates of eMudhra are left out on every model.
+- **HTTPS replies on every model.** Spoken replies and announcements from a Home Assistant that serves HTTPS were
+  refused on the Echo Spot ("cannot be authenticated with given CA certificates") although its firmware trusts
+  Let's Encrypt's root: Amazon's libcurl there was built to look for its certificates in a Linux file the Echo does
+  not have. hassmic now tells libcurl where the Echo's own store is and brings Let's Encrypt's two roots along
+  (`cacerts.pem`, next to the binary), so "Check HTTPS certificates" can stay on everywhere.
 
 ## 2026-11-04
 

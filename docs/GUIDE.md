@@ -18,7 +18,9 @@ Assistant that serves HTTPS itself (`ssl_certificate` under `http:`) gives out i
 its rule, for every device), so the Echo must reach that name from inside your network: through your router
 (NAT loopback) or a local DNS entry for it. The certificate is checked: a self-signed one, or one that does not name
 that address, is refused ("SSL peer certificate ... was not OK" in the log). "Check HTTPS certificates" (settings page,
-System) off takes any certificate, but then anyone on your network could slip the Echo audio of their own.
+System) off takes any certificate, but then anyone on your network could slip the Echo audio of their own. The
+authorities trusted are the Echo's own store plus Let's Encrypt's roots, which hassmic brings along, so a Let's Encrypt
+certificate works on every model, the oldest Fire OS included.
 
 - **Speak straight on** after the wake word: Home Assistant gets everything from the end of the word, so "Alexa turn on
   the light" in one breath works, and you need not wait for the tone. The tone itself is partly still in what Home

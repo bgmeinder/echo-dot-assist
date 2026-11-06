@@ -9,7 +9,7 @@ D=/data/local/hassmic
 adb shell "mkdir -p $D"
 adb push $(ls $OUT/mixcap $OUT/mixplay $OUT/pryon_test 2>/dev/null) $OUT/hassmic $OUT/runas $DDIR/device.conf scripts/device/*.sh testdata/alexa_espeak.raw $D/ >/dev/null
 # the wake word aligners (src/hassmic/wakealign.h)
-adb push wakealign/*.wa wakealign/*.was $D/ >/dev/null
+adb push wakealign/*.wa wakealign/*.was scripts/device/cacerts.pem $D/ >/dev/null   # cacerts.pem: Let's Encrypt's roots for the firmware's libcurl (https.c)
 [ -n "$ANDROID" ] && adb push scripts/device/wifictl.dex ${SCREEN_BAND:+scripts/device/ringbar.dex} $D/ >/dev/null
 [ -f $OUT/libhmui.so ] && adb push $OUT/libhmui.so scripts/device/screen.dex $D/ >/dev/null
 adb shell "chmod 755 $D/*"

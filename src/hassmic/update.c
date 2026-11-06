@@ -32,6 +32,7 @@
 #include <time.h>
 #include "board.h"
 #include "core.h"
+#include "https.h"
 #include "net.h"
 #include "ota.h"
 
@@ -67,6 +68,7 @@ static void (*notify)(void);
 enum { OPT_WRITEDATA = 10001, OPT_URL = 10002, OPT_USERAGENT = 10018, OPT_TIMEOUT = 13, OPT_LOW_SPEED_LIMIT = 19,
        OPT_LOW_SPEED_TIME = 20, OPT_NOPROGRESS = 43, OPT_FAILONERROR = 45, OPT_FOLLOWLOCATION = 52, OPT_XFERINFODATA = 10057,
        OPT_MAXREDIRS = 68, OPT_CONNECTTIMEOUT = 78, OPT_NOSIGNAL = 99, OPT_OPENSOCKETFUNCTION = 20163,
+       OPT_CAINFO = 10065, OPT_CAPATH = 10097,
        OPT_OPENSOCKETDATA = 10164, OPT_PROTOCOLS = 181, OPT_REDIR_PROTOCOLS = 182, OPT_WRITEFUNCTION = 20011,
        OPT_XFERINFOFUNCTION = 20219, INFO_RESPONSE_CODE = 0x200002, PROTO_HTTP_S = 1 | 2, CURLE_HTTP_RETURNED_ERROR = 22 };
 struct curl_sockaddr { int family, socktype, protocol; unsigned addrlen; };     /* followed by the address; unused here */
@@ -135,6 +137,9 @@ static int fetch(const char *url, struct buf *b, size_t max, int progress, int q
     if (!curl_load() || !(h = curl.init())) { snprintf(err, cap, "no libcurl on this device"); return -1; }
     curl.setopt(h, OPT_URL, url);
     curl.setopt(h, OPT_USERAGENT, "hassmic/" CURRENT);   /* GitHub's API refuses requests without one */
+    const char *cf = https_ca_file(), *cp = https_ca_path();        /* a store that exists (https.c says why) */
+    if (cf) curl.setopt(h, OPT_CAINFO, cf);
+    if (cp) curl.setopt(h, OPT_CAPATH, cp);
     curl.setopt(h, OPT_PROTOCOLS, (long)PROTO_HTTP_S); curl.setopt(h, OPT_REDIR_PROTOCOLS, (long)PROTO_HTTP_S);
     curl.setopt(h, OPT_FOLLOWLOCATION, 1L); curl.setopt(h, OPT_MAXREDIRS, 5L);     /* downloads redirect to a CDN */
     curl.setopt(h, OPT_FAILONERROR, 1L); curl.setopt(h, OPT_NOSIGNAL, 1L);

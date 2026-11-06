@@ -26,6 +26,7 @@
 #include "davs.h"
 #include "artifacts.h"
 #include "core.h"
+#include "https.h"
 #include "dha.h"
 #include "hash.h"
 #include "net.h"
@@ -101,6 +102,7 @@ static void say_err(const char *fmt, ...)                     /* lk held */
 enum { OPT_WRITEDATA = 10001, OPT_URL = 10002, OPT_POSTFIELDS = 10015, OPT_USERAGENT = 10018, OPT_HTTPHEADER = 10023,
        OPT_POSTFIELDSIZE = 60, OPT_TIMEOUT = 13, OPT_LOW_SPEED_LIMIT = 19, OPT_LOW_SPEED_TIME = 20, OPT_NOPROGRESS = 43,
        OPT_FAILONERROR = 45, OPT_FOLLOWLOCATION = 52, OPT_MAXREDIRS = 68, OPT_CONNECTTIMEOUT = 78, OPT_NOSIGNAL = 99,
+       OPT_CAINFO = 10065, OPT_CAPATH = 10097,
        OPT_OPENSOCKETFUNCTION = 20163, OPT_OPENSOCKETDATA = 10164, OPT_PROTOCOLS = 181, OPT_REDIR_PROTOCOLS = 182,
        OPT_WRITEFUNCTION = 20011, OPT_XFERINFODATA = 10057, OPT_XFERINFOFUNCTION = 20219,
        INFO_RESPONSE_CODE = 0x200002, PROTO_HTTP_S = 1 | 2 };
@@ -181,6 +183,9 @@ static size_t on_file(char *d, size_t size, size_t n, void *arg)
 static void curl_common(void *h)
 {
     curl.setopt(h, OPT_USERAGENT, "hassmic");
+    const char *cf = https_ca_file(), *cp = https_ca_path();        /* a store that exists (https.c says why) */
+    if (cf) curl.setopt(h, OPT_CAINFO, cf);
+    if (cp) curl.setopt(h, OPT_CAPATH, cp);
     curl.setopt(h, OPT_PROTOCOLS, (long)PROTO_HTTP_S); curl.setopt(h, OPT_REDIR_PROTOCOLS, (long)PROTO_HTTP_S);
     curl.setopt(h, OPT_FOLLOWLOCATION, 1L); curl.setopt(h, OPT_MAXREDIRS, 3L);
     curl.setopt(h, OPT_FAILONERROR, 0L);                       /* the answers' bodies say more than their codes */
