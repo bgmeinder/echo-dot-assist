@@ -84,7 +84,9 @@ const struct board board = {
     .thermal_type = "mtktscpu",
     /* an ALS behind MediaTek's alsps framework (m_alsps_input), no libacehal_ambientLightSensor and no lux file under
      * /sys/bus/platform/drivers/als_ps on this kernel: none until one is found (verify) */
-    .light_sensor = { NULL },
+    /* a TI OPT3001 on I2C 0-0044 (driver opt300x, MediaTek's "alsps"), through IIO: calibrated lux as text, world-readable
+     * (0.22 in a dark room, 2026-11-06); the stable path, not the iio:device number's own */
+    .light_sensor = { "/sys/bus/i2c/devices/0-0044/iio:device0/in_illuminance_input", NULL },
     .jack_state = "/sys/class/switch/h2w/state",                 /* 0 out, 1 headset, 2 headphones (2026-11-05) */
     .screen_round = 1,                                              /* the ring drawn around the rim of the round screen (ring_band.c) */
     /* the Spot's clock-face package: Amazon's analog faces as data (templates, faces, backgrounds) and their art,

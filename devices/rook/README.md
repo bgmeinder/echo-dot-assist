@@ -109,7 +109,8 @@ hassmic's home screen in front (its APK with `minSdkVersion` 22 now), `wifictl.d
 `setWifiEnabled(boolean)`, the settings page, ESPHome on 26053, the firewall (rule by rule: no `iptables-restore` on
 Fire OS 5), Alexa's apps off, self test passed.
 The clock: hassmic's digital clock or one of the firmware's analog faces (setting clock_face, read from the clock-face
-package Alexa's clock used, now under /system/hassmic-removed; 2026-11-06).
+package Alexa's clock used, now under /system/hassmic-removed; 2026-11-06), its night version by the light sensor
+(a TI OPT3001 on I2C 0-0044, lux from IIO's in_illuminance_input; HA's Illuminance with "Light sensor" on).
 The speaker: muted from boot by the codec's "MFP Gpio Mute", which only stock's boot sound tool switched off
 (`board.speaker_unmute`, spkgain.c switches it off and keeps it so); Android 5.1's audio service transaction numbers
 (4 sets the music stream, 15 reads its maximum) probed on the Spot and in audio_android.c.

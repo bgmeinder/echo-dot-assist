@@ -3099,8 +3099,10 @@ Run in this order. Each step says what it proves.
       own) turns template + time into parts; ringbar.dex's ring mode draws them by name through Resources over its own
       AssetManager (kinds 7 path, 8 package, 6 cleared, 4 a part rotated about the centre / tinted SRC_IN / centred at
       its intrinsic size or filling, 5 shown; tests/unit/ringbar_run.py), so layer-lists and densities are Android's own.
-      ring_band.c draws once a second (the wait ends just past the next second), night 21:00-07:00 or by the light
-      sensor (rook has none).  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (28 options)
+      ring_band.c draws once a second (the wait ends just past the next second), night by the light sensor (under 3
+      lux, back over 10; 21:00-07:00 where there is none).  rook's light sensor: a TI OPT3001 on I2C 0-0044 (driver
+      opt300x, MediaTek's "alsps"), lux as text in /sys/bus/i2c/devices/0-0044/iio:device0/in_illuminance_input,
+      world-readable: board.light_sensor; HA's Illuminance read 0.22 lx in a dark room, as the file (2026-11-06).  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (28 options)
       switches within a second; screenshots of Abstract shapes and Beach at night (2026-11-06).  Not yet: the faces by
       day seen on the device, a template's other faces and backgrounds (clockface_styles/colors exist, no setting).
       (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`

@@ -6,10 +6,12 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 - **Echo Spot: its own analog clock faces.** "Clock face" (settings page, Lights, with a picture of each; and a select
   in Home Assistant) puts one of the Spot's 22 analog faces from Alexa's clock in place of the digital clock: its
-  background, its dial and its hands, the second hand ticking, and the dimmed night version from 21:00 to 07:00. The
+  background, its dial and its hands, the second hand ticking, and the dimmed night version when the room is dark. The
   faces are read from the Spot's own firmware; nothing is downloaded and Alexa stays off (the designs whose pictures
   came from Amazon's online photos are left out). "Digital" keeps hassmic's
   clock. "Clock on the screen" must be on for either.
+- **Echo Spot: its light sensor.** "Light sensor" (Features) now works on the Spot too: an Illuminance sensor in Home
+  Assistant, in lux.
 
 ## 2026-11-05
 
