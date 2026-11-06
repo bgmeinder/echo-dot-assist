@@ -4,6 +4,12 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-11-06
 
+- **Echo Spot: every dial, background and the date on the clock faces.** Each of the Spot's analog faces comes with
+  its own dials and backgrounds; until now hassmic showed each design's default only. "Clock dial" and "Clock
+  background" (settings page, Lights, the backgrounds by their pictures; and selects in Home Assistant) pick among the
+  face's own: up to four dials and three to ten backgrounds a design. "Date on the clock face" puts the day of the
+  month in the face's date window. Picking another face in Home Assistant now makes it read the Echo's entities
+  again (a few seconds), since the dials and backgrounds are that face's.
 - **Echo Spot: no more deaf seconds when a setting changes.** Picking a clock face in Home Assistant (or changing any
   setting, or Home Assistant connecting) left the Spot unable to hear its wake word for 2 to 5 seconds, and Home
   Assistant's drop-down jumped back to the old choice for as long. Its light sensor takes most of a second for each

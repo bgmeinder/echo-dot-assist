@@ -67,7 +67,7 @@ static void path(char *out, size_t cap, const char *file) { snprintf(out, cap, "
 
 /* ---------------------------------------------------------------- the table */
 
-enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, STOP_ENDS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, SCREEN_CLOCK, CLOCK_FACE, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WHISPER_REPLY, HEADPHONE_VOL, WAKE_EVENTS, REQUEST_TEXT, WIFI_MOTION, 
+enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, STOP_ENDS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, SCREEN_CLOCK, CLOCK_FACE, CLOCK_DIAL, CLOCK_BG, CLOCK_DATE, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WHISPER_REPLY, HEADPHONE_VOL, WAKE_EVENTS, REQUEST_TEXT, WIFI_MOTION, 
           WIFI_SENS, LIGHT_SENSOR, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, VOLUME, VOL_SPLIT, 
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET, NSET };
@@ -121,6 +121,11 @@ static const struct setting table[NSET] = {
     [SCREEN_CLOCK] = { "screen_clock", "Clock on the screen", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
     /* the firmware's analog faces (clockface.c) in place of the digital clock; by template id, "digital" for none */
     [CLOCK_FACE]  = { "clock_face", "Clock face", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    /* the face's own dial and background (clockface_dial_names: the template's, by short name; a new face starts at its
+     * defaults) and its date window, the day of the month in it */
+    [CLOCK_DIAL]  = { "clock_dial", "Clock dial", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [CLOCK_BG]    = { "clock_background", "Clock background", "Lights", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [CLOCK_DATE]  = { "clock_date", "Date on the clock face", "Lights", NULL, S_BOOL, 0, 1, 1, 0 },
     [ARB]         = { "arbitration", "Wake word arbitration with other Echos", "Features", NULL, S_BOOL, 0, 1, 1, 1 },
     /* arb.c keeps them in memory, state/config on disk: lockdown.sh admits Kiosk Satellite's port by it */
     [ARB_MODE]    = { "arbitration_mode", "Arbitration mode", "Features", NULL, S_CHOICE, 0, 0, 1, 0 },
@@ -207,7 +212,8 @@ static int present(enum id i)
     case SPK_GAIN: return spkgain_present();
     case BAND: return ring_band_rows(-1) >= 0;
     case SCREEN_CLOCK: return ring_band_rows(-1) >= 0 && board.screen_round;   /* the renderer's text: the round screen's */
-    case CLOCK_FACE: return ring_band_rows(-1) >= 0 && board.screen_round && clockface_count() > 0;
+    case CLOCK_FACE: case CLOCK_DIAL: case CLOCK_BG: case CLOCK_DATE:
+        return ring_band_rows(-1) >= 0 && board.screen_round && clockface_count() > 0;
     case KIOSK_NET: case KIOSK_MIC: case KIOSK_CAM: return board.kiosk;
     case RING_ROT: return ring_band_rows(-1) < 0;                 /* LEDs to turn: the Dots' ring, not the band */
     default: return 1;
@@ -239,6 +245,13 @@ int settings_choices(const struct setting *s, const char *const **names)
     switch (s - table) {
     case SCREEN_CLOCK: *names = clock_modes; return 3;
     case CLOCK_FACE: { int n; *names = clockface_names(&n); return n; }
+    /* the face's own: none on the digital clock (the page shows the row empty, Home Assistant does not list it) */
+    case CLOCK_DIAL: case CLOCK_BG: {
+        int f = ring_band_face(-1), n = 0;
+        if (f <= 0) return 0;
+        *names = s - table == CLOCK_DIAL ? clockface_dial_names(f - 1, &n) : clockface_background_names(f - 1, &n);
+        return n;
+    }
     case DENOISE: *names = denoise_values; return 4;
     case BT_LANG:
         for (int i = 0; i < bt_lang_count; i++) bt_lang_codes[i] = bt_langs[i].code;
@@ -328,6 +341,9 @@ int settings_get(const struct setting *s)
     case BAND: return ring_band_rows(-1);
     case SCREEN_CLOCK: return ring_band_clock(-1);
     case CLOCK_FACE: return ring_band_face(-1);
+    case CLOCK_DIAL: return ring_band_dial(-2);
+    case CLOCK_BG: return ring_band_background(-2);
+    case CLOCK_DATE: return ring_band_date(-1);
     default: return 0;
     }
 }
@@ -396,6 +412,9 @@ static void put(enum id i, int v)
     case BAND: ring_band_rows(v); break;
     case SCREEN_CLOCK: ring_band_clock(v); break;
     case CLOCK_FACE: ring_band_face(v); break;
+    case CLOCK_DIAL: ring_band_dial(v); break;
+    case CLOCK_BG: ring_band_background(v); break;
+    case CLOCK_DATE: ring_band_date(v); break;
     default: break;
     }
 }
@@ -434,7 +453,8 @@ static size_t format(const struct setting *s, char *out, size_t cap)
 
 /* Applied before the rest, whatever order a file has them in (state/config by hand, an import): switching seeds what
  * comes after it (separate volumes the levels, following the music the offset), and the saved values must then win */
-static int switches(int i) { return i == VOL_SPLIT || i == ASSIST_LINK || i == SOUNDS_LINK || i == TIMER_LINK || i == CALL_LINK; }
+/* the clock face too: its dial's and background's choices are its own, so they must find it set */
+static int switches(int i) { return i == VOL_SPLIT || i == ASSIST_LINK || i == SOUNDS_LINK || i == TIMER_LINK || i == CALL_LINK || i == CLOCK_FACE; }
 
 /* What state/config holds: the settings no other module keeps */
 static int ours(enum id i) { return i != ARB && i != SS_UNPAIRED && i != EQ_BASS && i != EQ_MID && i != EQ_TREBLE && i != BT_OUT_DELAY && i != VOLUME; }
@@ -597,6 +617,8 @@ int settings_set(const char *name, const char *value, char *err, size_t errsz)
     if (ours((enum id)(s - table))) settings_save();
     core_settings_changed();
     if (s->feature && was != v) core_entities_changed();          /* Home Assistant reads the list again */
+    /* another face: other dials and backgrounds, and an ESPHome select's options are part of its listing */
+    else if (s - table == CLOCK_FACE && was != v) core_entities_changed();
     return 0;
 }
 
@@ -610,6 +632,8 @@ size_t settings_text(char *out, size_t cap, int export_only)
         /* a level fixes it (auto off): with auto on, the level is only what the room made it */
         if (export_only && ids[i] == LED_LEVEL && present(LED_AUTO) && core_led_auto(-1)) continue;
         format(s, v, sizeof v);
+        /* a choice with nothing to choose (the dial on the digital clock): no line, which an import could not take */
+        if (s->type == S_CHOICE && !v[0]) continue;
         n += (size_t)snprintf(out + n, cap - n, "%s=%s\n", s->name, v);
     }
     return n < cap ? n : cap;

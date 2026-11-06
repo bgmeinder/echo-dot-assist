@@ -24,6 +24,7 @@ static int loaded;
 struct tmpl {
     char id[48];
     const char *styles[MAX_PER], *colors[MAX_PER];      /* malloc'd ids */
+    const char *snames[MAX_PER], *cnames[MAX_PER];      /* the same, short (clockface_dial_names): inside them */
     int nstyles, ncolors, def_style, def_color;
 };
 static struct tmpl tm_[MAX_TMPL];
@@ -130,6 +131,16 @@ static int parse(const char *entry, struct json *j, unsigned char **buf)
 
 static int by_id(const void *a, const void *b) { return strcmp(((const struct tmpl *)a)->id, ((const struct tmpl *)b)->id); }
 
+/* an id as people read it: without "<template>_" and the dial's "analog_" (every dial offered is analog); the id whole
+ * where that would leave nothing or it does not start so (a background another template shares) */
+static const char *short_name(const char *id, const char *tmpl, int dial)
+{
+    size_t n = strlen(tmpl);
+    const char *s = !strncmp(id, tmpl, n) && id[n] == '_' && id[n + 1] ? id + n + 1 : id;
+    if (dial && !strncmp(s, "analog_", 7) && s[7]) s += 7;
+    return s;
+}
+
 /* the analog faces of a face list: kept by id when its own JSON says is_analog */
 static int analog(const char *face)
 {
@@ -179,6 +190,8 @@ static void load(void)
          * not in the package: none of those here, hassmic stays local */
         int online = json_get(&j, 0, "photo_provider") >= 0;
         json_free(&j); free(b);
+        for (int k = 0; k < t->nstyles; k++) t->snames[k] = short_name(t->styles[k], t->id, 1);
+        for (int k = 0; k < t->ncolors; k++) t->cnames[k] = short_name(t->colors[k], t->id, 0);
         if (t->id[0] && t->nstyles && t->ncolors && !online) ntm++;
         else { for (int k = 0; k < t->nstyles; k++) free((void *)t->styles[k]); for (int k = 0; k < t->ncolors; k++) free((void *)t->colors[k]); }
     }
@@ -203,6 +216,17 @@ const char *const *clockface_colors(int i, int *n)
 }
 int clockface_default_style(int i) { pthread_mutex_lock(&lock); struct tmpl *t = tmpl_at(i); int r = t ? t->def_style : 0; pthread_mutex_unlock(&lock); return r; }
 int clockface_default_color(int i) { pthread_mutex_lock(&lock); struct tmpl *t = tmpl_at(i); int r = t ? t->def_color : 0; pthread_mutex_unlock(&lock); return r; }
+/* kept for good once loaded (as names): no lock needed after it */
+const char *const *clockface_dial_names(int i, int *n)
+{
+    pthread_mutex_lock(&lock); struct tmpl *t = tmpl_at(i); *n = t ? t->nstyles : 0; pthread_mutex_unlock(&lock);
+    return t ? t->snames : NULL;
+}
+const char *const *clockface_background_names(int i, int *n)
+{
+    pthread_mutex_lock(&lock); struct tmpl *t = tmpl_at(i); *n = t ? t->ncolors : 0; pthread_mutex_unlock(&lock);
+    return t ? t->cnames : NULL;
+}
 
 /* ---------------------------------------------------------------- what to draw */
 
@@ -228,18 +252,36 @@ static int image_op(struct json *j, int l, int night, struct cf_op *op)
     int cx = json_get(j, l, "center_x"), cy = json_get(j, l, "center_y");
     op->cx = cx >= 0 && cy >= 0 ? (int)json_int(j, cx, -1) : -1;
     op->cy = cx >= 0 && cy >= 0 ? (int)json_int(j, cy, -1) : -1;
-    op->rot = 0;
+    op->rot = 0; op->text[0] = 0; op->size = 0;
     return 1;
 }
 
-/* a layer for the date only (SHOWS_DATE): left out, as the date window is */
+/* a layer for the date only (SHOWS_DATE): the window's image and the DateWindowLayer, left out without clock_date */
 static int date_only(struct json *j, int l)
 {
     JSON_EACH(j, json_get(j, l, "layer_properties"), k) if (json_streq(j, k, "SHOWS_DATE")) return 1;
     return 0;
 }
 
-int clockface_ops(int ti, int style, int color, const struct tm *tm, int night, struct cf_op *ops, int max)
+/* The DateWindowLayer: the day of the month, centred on center_x, its baseline at bottom_y, in day_color/night_color.
+ * Its style (TextAppearance.Fluid.Speech.Secondary3) is a theme of Amazon's app, not in the package: 26 px fills the
+ * window images (72 x 52, the text's baseline 12 px under their centre) as stock's day number did, by eye */
+#define DATE_PX 26
+static int date_op(struct json *j, int l, int night, int mday, struct cf_op *op)
+{
+    char v[96] = "";
+    int cx = json_get(j, l, "center_x"), by = json_get(j, l, "bottom_y");
+    if (cx < 0 || by < 0) return 0;
+    memset(op, 0, sizeof *op);
+    op->cx = (int)json_int(j, cx, 240); op->cy = (int)json_int(j, by, 240);
+    op->tint = json_str(j, json_get(j, l, night ? "night_color" : "day_color"), v, sizeof v) ? colour(v) : 0;
+    if (!op->tint) op->tint = 0xFFFFFFFFu;
+    op->size = DATE_PX;
+    snprintf(op->text, sizeof op->text, "%d", mday);
+    return 1;
+}
+
+int clockface_ops(int ti, int style, int color, int date, const struct tm *tm, int night, struct cf_op *ops, int max)
 {
     char face[96], bg[96], e[160];
     pthread_mutex_lock(&lock);
@@ -259,16 +301,17 @@ int clockface_ops(int ti, int style, int color, const struct tm *tm, int night, 
     if (parse(e, &j, &b)) return n ? n : -1;
     double s = tm->tm_sec, m = tm->tm_min + s / 60, h = tm->tm_hour % 12 + m / 60;
     JSON_EACH(&j, json_get(&j, 0, "layers"), l) {
-        if (n >= max || date_only(&j, l)) continue;
+        if (n >= max || (!date && date_only(&j, l))) continue;
         int type = json_get(&j, l, "type");
         if (json_streq(&j, type, "ImageLayer")) { if (image_op(&j, l, night, &ops[n])) n++; continue; }
+        if (json_streq(&j, type, "DateWindowLayer")) { if (date_op(&j, l, night, tm->tm_mday, &ops[n])) n++; continue; }
         if (!json_streq(&j, type, "RotatingHandLayer") && !json_streq(&j, type, "MaskedRotatingHandLayer")) continue;
         if (!image_op(&j, l, night, &ops[n])) continue;
         int r = json_get(&j, l, "hand_rotation");
         double deg = json_streq(&j, r, "HOUR_12") ? h * 30 : json_streq(&j, r, "HOUR_24") ? (tm->tm_hour + m / 60) * 15
                    : json_streq(&j, r, "MINUTE") ? m * 6 : json_streq(&j, r, "SECOND") ? s * 6 : -1;
         if (deg < 0) continue;
-        ops[n].rot = (int)(deg * 100 + 0.5) % 36000; ops[n].cx = ops[n].cy = -1;
+        ops[n].rot = (int)(deg * 100 + 0.5) % 36000; ops[n].cx = ops[n].cy = -1; ops[n].text[0] = 0;
         n++;
     }
     json_free(&j); free(b);
@@ -282,4 +325,29 @@ unsigned char *clockface_thumb(int ti, size_t *len)
     if (t) snprintf(e, sizeof e, "res/drawable/img_list_clockface_%s.png", t->id);
     pthread_mutex_unlock(&lock);
     return t ? zip_read(e, len) : NULL;
+}
+
+/* styled_background.src of the background's JSON (bg_home_<...>: the picture Amazon's home screen used for it, 480 px
+ * in res/drawable/), the PNG of that name in any res/drawable* folder of the package */
+unsigned char *clockface_background_thumb(int ti, int ci, size_t *len)
+{
+    char e[160], src[96] = "", want[110];
+    pthread_mutex_lock(&lock); struct tmpl *t = tmpl_at(ti);
+    int ok = t && ci >= 0 && ci < t->ncolors;
+    if (ok) snprintf(e, sizeof e, "assets/raw/clock_background_%s", t->colors[ci]);
+    pthread_mutex_unlock(&lock);
+    if (!ok) return NULL;
+    struct json j; unsigned char *b;
+    if (parse(e, &j, &b)) return NULL;
+    json_str(&j, json_get(&j, json_get(&j, 0, "styled_background"), "src"), src, sizeof src);
+    json_free(&j); free(b);
+    if (!src[0]) return NULL;
+    snprintf(want, sizeof want, "/%s.png", src);
+    size_t wl = strlen(want);
+    for (int i = 0; i < nzents; i++) {
+        size_t nl = strlen(zents[i].name);
+        if (!strncmp(zents[i].name, "res/drawable", 12) && nl > wl && !strcmp(zents[i].name + nl - wl, want))
+            return zip_read(zents[i].name, len);
+    }
+    return NULL;
 }

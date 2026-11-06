@@ -680,13 +680,41 @@ int ring_band_clock(int set)
  * hands), shown (5).  Night (the night images and tints, as stock's dimmed face): the room dark by the light sensor
  * (under board.lux_dark, 3 lux where 0; light again at 3 times it), or 21:00-07:00 where there is none.  clock_shown is then 100 + the face */
 static int clock_face, faces_told, face_night;
+/* the face's dial and background (-1: the template's own default; a new face starts there again: one template's dial
+ * index means nothing for another's) and the date window; face_ver counts changes, drawn at once (face_drawn) */
+static int clock_dial = -1, clock_bg = -1, clock_date, face_ver, face_drawn;
 
 int ring_band_face(int set)
 {
     int n; clockface_names(&n);
     pthread_mutex_lock(&lock);
-    if (set >= 0 && set < n && set != clock_face) { clock_face = set; pthread_cond_signal(&cv); }
+    if (set >= 0 && set < n && set != clock_face) { clock_face = set; clock_dial = clock_bg = -1; face_ver++; pthread_cond_signal(&cv); }
     int r = clock_face;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
+/* one of the face's lists: dial (names) or background; set -2 reads what is drawn */
+static int face_pick(int *v, int set, int dial)
+{
+    pthread_mutex_lock(&lock); int face = clock_face; pthread_mutex_unlock(&lock);
+    int n = 0;
+    if (face > 0) { if (dial) clockface_dial_names(face - 1, &n); else clockface_background_names(face - 1, &n); }
+    pthread_mutex_lock(&lock);
+    if (set >= -1 && set < n && set != *v && face == clock_face) { *v = set; face_ver++; pthread_cond_signal(&cv); }
+    int r = *v;
+    pthread_mutex_unlock(&lock);
+    if (r < 0) r = face > 0 ? (dial ? clockface_default_style(face - 1) : clockface_default_color(face - 1)) : 0;
+    return r;
+}
+int ring_band_dial(int set) { return face_pick(&clock_dial, set, 1); }
+int ring_band_background(int set) { return face_pick(&clock_bg, set, 0); }
+
+int ring_band_date(int set)
+{
+    pthread_mutex_lock(&lock);
+    if (set >= 0 && !!set != clock_date) { clock_date = !!set; face_ver++; pthread_cond_signal(&cv); }
+    int r = clock_date;
     pthread_mutex_unlock(&lock);
     return r;
 }
@@ -705,10 +733,17 @@ static int face_draw(int fd, int tmpl, const struct tm *tm, int new_minute)
         else face_night = tm->tm_hour >= 21 || tm->tm_hour < 7;
     }
     struct cf_op ops[48];
-    int n = clockface_ops(tmpl, -1, -1, tm, face_night, ops, 48);
+    pthread_mutex_lock(&lock); int dial = clock_dial, bg = clock_bg, date = clock_date; pthread_mutex_unlock(&lock);
+    int n = clockface_ops(tmpl, dial, bg, date, tm, face_night, ops, 48);
     if (n < 0) return 1;                            /* no such face: the digital clock */
     if (send_msg(fd, 6, 0, 0, 0, NULL, 0)) return -1;
     for (int i = 0; i < n; i++) {
+        if (ops[i].text[0]) {                       /* the date: kind 9, centred on its point of the 480 face, scaled */
+            int s = screen_h > 0 ? screen_h : 480, x = ops[i].cx * s / 480, y = ops[i].cy * s / 480;
+            if (x > 0 && send_msg(fd, 9, (x & 0xffff) << 16 | (y & 0xffff), ops[i].size * s / 480, (int)ops[i].tint,
+                                  ops[i].text, strlen(ops[i].text))) return -1;
+            continue;
+        }
         int c = ops[i].cx < 0 ? -1 : (ops[i].cx & 0xffff) << 16 | (ops[i].cy & 0xffff);
         if (send_msg(fd, 4, ops[i].rot, (int)ops[i].tint, c, ops[i].name, strlen(ops[i].name))) return -1;
     }
@@ -717,12 +752,13 @@ static int face_draw(int fd, int tmpl, const struct tm *tm, int new_minute)
 
 static int clock_tick(int fd)                   /* -1: the renderer is gone */
 {
-    pthread_mutex_lock(&lock); int mode = clock_mode, face = clock_face; pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&lock); int mode = clock_mode, face = clock_face, ver = face_ver; pthread_mutex_unlock(&lock);
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
     int minute = tm.tm_hour * 60 + tm.tm_min;
     if (mode && face > 0 && face <= clockface_count()) {
         int second = minute * 60 + tm.tm_sec;
-        if (clock_shown == 100 + face && second == clock_minute) return 0;
+        if (clock_shown == 100 + face && second == clock_minute && ver == face_drawn) return 0;
+        face_drawn = ver;                           /* a dial, background or date changed: drawn now, not next second */
         int fresh = clock_shown != 100 + face, r = face_draw(fd, face - 1, &tm, fresh || tm.tm_sec == 0);
         if (r < 0) return -1;
         if (!r) {

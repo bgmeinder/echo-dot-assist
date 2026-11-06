@@ -3110,8 +3110,20 @@ Run in this order. Each step says what it proves.
       mode on the same sensor (screen_brightness_mode=1) follows within 3 s: 38 lit, 1 dark, which looked right at
       night by the owner's eye.  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (23 options)
       switches within a second; screenshots of Abstract shapes and Beach at night, Beach by day (2026-11-06).  Not yet:
-      a template's other faces and backgrounds (clockface_styles/colors exist, no setting); the settings page's
-      picker seen in a browser.
+      the settings page's picker seen in a browser.
+      Dials, backgrounds, date (2026-11-06): of the 22 templates, 17 have 2-4 analog faces and all have 3-10 backgrounds
+      (clock_template_<id>: face_ids, background_ids, default; the digital faces stay out).  Settings clock_dial and
+      clock_background by short name (the id without "<template>_", a dial's "analog_" too: "tapered", "ocean";
+      clockface_dial_names), choices the face's own, so clock_face goes first wherever settings are applied (switches());
+      ring_band keeps the index, -1 the template's default, reset by a new face.  HA: two selects listed only for an
+      analog face, their options that face's: a new face closes the links (core_entities_changed) so HA lists them again.
+      clock_date: the face's SHOWS_DATE layers (the window's image, 72 x 52) and its DateWindowLayer, the day of the
+      month centred on center_x with its baseline at bottom_y (57 analog faces have one: at 9 o'clock x 108-140, at 3
+      x 363-364, at 12 y 138-140), 26 px by eye (its TextAppearance.Fluid.Speech.Secondary3 is Amazon's app's theme, not
+      in the package), day_color/night_color.  The renderer: kind 9 = text drawn among the parts, shown at kind 5; text
+      centred at (a >> 16, a & 0xffff) when a >= 65536 (kind 2 too).  The page: backgrounds by their styled_background
+      (bg_home_*, the home screen's picture of each; GET /api/clockface/<n>/bg/<k>), dials by name; it rebuilds when a
+      setting's choices change (render()'s sig).
       To do: rook's lux in true lux.  The OPT3001 behind the dark glass reads some 1/100-1/1000 of the room's light,
       so HA's Illuminance is not comparable with other sensors.  A scale factor (a board field multiplying what
       core_lux reads, lux_dark then on the true scale) from one reading beside a reference (a phone's light meter on

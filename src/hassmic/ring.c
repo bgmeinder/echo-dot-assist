@@ -1105,6 +1105,9 @@ void ring_music_art(const void *i, size_t n) { (void)i; (void)n; }
 int  ring_band_rows(int set) { (void)set; return -1; }
 int  ring_band_clock(int set) { (void)set; return 0; }       /* no screen here */
 int  ring_band_face(int set) { (void)set; return 0; }
+int  ring_band_dial(int set) { (void)set; return 0; }
+int  ring_band_background(int set) { (void)set; return 0; }
+int  ring_band_date(int set) { (void)set; return 0; }
 
 void ring_light_set(const struct ring_light *l, unsigned flash_ms)
 {

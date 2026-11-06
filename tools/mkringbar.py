@@ -460,7 +460,9 @@ def emit():
 
     # ---- the ring mode's messages: a header of 5 little-endian ints (kind, a, b, c, n) then n payload bytes.
     # kind 0: a strip frame (n = sw * sr * 4), laid on the layer by the table; kind 1: the text cleared; kind 2: text
-    # (the payload, UTF-8) drawn centred at x = w / 2, baseline a, size b px, colour c (ARGB), over what is there.  The
+    # (the payload, UTF-8) drawn centred at x = w / 2, baseline a, size b px, colour c (ARGB), over what is there (a >= 65536:
+    # centred at x = a >> 16, baseline a & 0xffff); kind 9: the same text drawn but not shown, a clock face's date window
+    # among its parts (kinds 4 to 8: facem below), shown with them at kind 5.  The
     # text lives in a Bitmap drawn by the framework's own Canvas and Paint (Roboto, antialiased); after a text
     # message the layer is that bitmap's pixels with the last strip laid on again, so the ring stays on top
     def ring():
@@ -544,6 +546,11 @@ def emit():
         c.ret(6, False)                                       # stdin ended inside it
         c.label("got")
         c.const_4(6, 0); c.aget(7, 2, 6, AGET)
+        c.lit(6, 9); c.if2(IFNE, 7, 6, "notdate")
+        c.new_instance(8, STR); c.invoke(DIRECT, "str.new_b", [8, 5])               # kind 9: a clock face's date, text
+        c.invoke(STATIC, "textm", [0, 8, 2, 3])               # drawn with the parts, shown with them at kind 5
+        c.const_4(6, 1); c.ret(6, False)
+        c.label("notdate")
         c.const_4(6, 4); c.if2(IFLT, 7, 6, "img")
         c.invoke(STATIC, "facem", [0, 5, 2, 3])               # a clock face's part, or what it is drawn from
         c.const_4(6, 1); c.ret(6, False)
@@ -814,9 +821,11 @@ def emit():
         c.ret_void()
         m.append(("clear", c))
 
-    def textm():                                              # paint.setTextSize(hdr[2]); paint.setColor(hdr[3]); canvas.drawText(str, w / 2, hdr[1], paint)
-        # ms=0 str=1 hdr=2 w=3 args=4 t=5 k=6 paint=7 canvas=8 z=9
-        c = Code(10, 4)
+    def textm():                                              # paint.setTextSize(hdr[2]); paint.setColor(hdr[3]); canvas.drawText(str, x, y, paint)
+        # x, y: w / 2 and hdr[1]; or, hdr[1] >= 65536, its high half and its low half (a clock face's date window, centred
+        # on its own point: the Paint is Align.CENTER)
+        # ms=0 str=1 hdr=2 w=3 args=4 t=5 k=6 paint=7 canvas=8 z=9 x=10 y=11
+        c = Code(12, 4)
         c.const_4(6, 5); c.aget(7, 0, 6, AGET_OBJ)
         c.const_4(6, 4); c.aget(8, 0, 6, AGET_OBJ)
         c.const_4(6, 1); c.new_array(4, 6, OBJARR)
@@ -827,10 +836,18 @@ def emit():
         c.const_4(6, 3); c.aget(9, 2, 6, AGET); c.invoke(STATIC, "int.value", [9]); c.move_result(5, True)
         c.const_4(6, 0); c.aput(5, 4, 6, APUT_OBJ)
         c.lit(6, 14); c.invoke(STATIC, "callm", [0, 6, 7, 4])
+        c.const_4(6, 1); c.aget(11, 2, 6, AGET)
+        c.binop_lit8(USHR8, 10, 11, 16)
+        c.ifz(IFNEZ, 10, "at")
+        c.binop_lit8(USHR8, 10, 3, 1)                         # centred on the screen, baseline a
+        c.goto_("put")
+        c.label("at")
+        c.lit(6, 0xffff); c.binop(AND, 11, 11, 6)             # at (a >> 16, a & 0xffff)
+        c.label("put")
         c.const_4(6, 4); c.new_array(4, 6, OBJARR)
         c.const_4(6, 0); c.aput(1, 4, 6, APUT_OBJ)
-        c.binop_lit8(USHR8, 9, 3, 1); c.invoke(STATIC, "fbox", [9]); c.move_result(5, True); c.const_4(6, 1); c.aput(5, 4, 6, APUT_OBJ)
-        c.const_4(6, 1); c.aget(9, 2, 6, AGET); c.invoke(STATIC, "fbox", [9]); c.move_result(5, True); c.const_4(6, 2); c.aput(5, 4, 6, APUT_OBJ)
+        c.invoke(STATIC, "fbox", [10]); c.move_result(5, True); c.const_4(6, 1); c.aput(5, 4, 6, APUT_OBJ)
+        c.invoke(STATIC, "fbox", [11]); c.move_result(5, True); c.const_4(6, 2); c.aput(5, 4, 6, APUT_OBJ)
         c.const_4(6, 3); c.aput(7, 4, 6, APUT_OBJ)
         c.lit(6, 11); c.invoke(STATIC, "callm", [0, 6, 8, 4])
         c.ret_void()

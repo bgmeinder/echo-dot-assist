@@ -33,7 +33,8 @@
  *   The timer's own sound (sounds.c): POST /api/timer-sound, a WAV the page made of the file picked, signed; the
  *   Echo checks the format only, it decodes nothing else.
  *   The clock faces' thumbnails (clockface.c): GET /api/clockface/<n>, unsigned (an <img> cannot sign; the firmware's
- *   own pictures, nothing of the Echo's or its owner's), the PNG Amazon's picker showed for choice n of clock_face.
+ *   own pictures, nothing of the Echo's or its owner's), the PNG Amazon's picker showed for choice n of clock_face;
+ *   GET /api/clockface/<n>/bg/<k>, the picture of that face's background k (choice k of clock_background).
  *   The log: GET /api/log/0 (boot.log) and /1 (its rotated part), signed, for the page's viewer.  What it says is
  *   plain on the network then, like the rest of the page: names, addresses, when the Echo was spoken to.  Secrets do
  *   not go out: the one hassmic logs, the Sendspin pairing token (scripts/lib/setup.sh reads it there over adb), is
@@ -1022,10 +1023,14 @@ static void log_redact(char *t, size_t n)
     }
 }
 
+/* /api/clockface/<n>: face n's picture; /api/clockface/<n>/bg/<k>: its background k's (clock_background's choice k) */
 static void clockface_api(int fd, struct req *r)
 {
-    int i; size_t n = 0; unsigned char *png;
-    if (sscanf(r->path, "/api/clockface/%d", &i) != 1 || i < 1 || !(png = clockface_thumb(i - 1, &n))) {
+    int i, k = -1; size_t n = 0; unsigned char *png = NULL; char c;
+    int got = sscanf(r->path, "/api/clockface/%d/bg/%d%c", &i, &k, &c);
+    if (got == 2 && i >= 1 && k >= 0) png = clockface_background_thumb(i - 1, k, &n);
+    else if (got == 1 && !strchr(r->path + 15, '/') && i >= 1) png = clockface_thumb(i - 1, &n);
+    if (!png) {
         respond_json(fd, 404, "{\"error\":\"not found\"}"); return;
     }
     respond(fd, 200, "image/png", NULL, png, n);

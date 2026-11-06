@@ -74,8 +74,14 @@ int  ring_band_rows(int set);
 /* the clock on a round screen (board.screen_round; setting screen_clock): 0 off, 1 24 h, 2 12 h; set < 0 reads.
  * Drawn by the band's renderer under the ring, the screen kept awake while it shows */
 int  ring_band_clock(int set);
-/* the clock's face there: an index of clockface_names (0 "digital", else one of the firmware's analog faces); set < 0 reads */
+/* the clock's face there: an index of clockface_names (0 "digital", else one of the firmware's analog faces); set < 0 reads.
+ * A new face takes its own default dial and background again */
 int  ring_band_face(int set);
+/* that face's dial and background: an index of clockface_dial_names / _background_names of the face's template, -1 its
+ * default; set -2 reads (what is drawn: the default's index for -1, 0 on the digital clock).  The date window: 0/1, < 0 reads */
+int  ring_band_dial(int set);
+int  ring_band_background(int set);
+int  ring_band_date(int set);
 /* what plays, from Sendspin: shown on a round screen in place of the clock while it plays (ring_band.c); the cover a
  * JPEG, n 0 none.  ring_shows_music: whether this model shows it (Sendspin then asks for metadata and artwork) */
 int  ring_shows_music(void);

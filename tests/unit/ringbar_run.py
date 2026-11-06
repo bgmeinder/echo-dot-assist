@@ -417,6 +417,18 @@ def main():
     seq = [e[0] for e in env.log if e[0] in ("drawable", "post")]
     check(seq == ["drawable"] * 3 + ["post"], "faces: drawn first, shown once at kind 5; before the package: nothing")
 
+    # a face's date window: kind 9, its text centred on (a >> 16, a & 0xffff), size b, colour c, among the parts and shown
+    # with them at kind 5; kind 2 with such an a draws at that point too (and shows at once, as kind 2 does)
+    day = i32(0xff009097)
+    stream = (table + msg(7, payload=b"/system/faces.apk") + msg(8, payload=b"com.example.faces") + msg(6)
+              + msg(4, 0, 0, -1, b"dial") + msg(9, (116 << 16) | 252, 26, day, b"6") + msg(4, 30425, 0, -1, b"hand") + msg(5)
+              + msg(2, (364 << 16) | 252, 26, colour, b"7"))
+    env = run(["10", "ctor", "ring"], (480, 480, 0), [stream])
+    seq = [e[0] if e[0] != "text" else e[:5] for e in env.log if e[0] in ("drawable", "text", "post")]
+    check(seq == ["drawable", ("text", "6", 116.0, 252.0, 26.0), "drawable", "post", ("text", "7", 364.0, 252.0, 26.0), "post"],
+          f"faces: the date (kind 9) drawn at its point between the parts, shown once at kind 5; kind 2 at a point ({seq})")
+    check(("text", "6", 116.0, 252.0, 26.0, day, "CENTER") in env.log, "the date: its colour, Paint.Align.CENTER")
+
     env = run(["10", "ctor", "ring"], (480, 480, 0), [table[:10]])
     check(env.out == ["ready 480 480"] and not [e for e in env.log if e[0] == "draw"],
           "ring: stdin ending inside the table: nothing drawn, the program ends")

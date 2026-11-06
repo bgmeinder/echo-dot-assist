@@ -211,7 +211,7 @@ const LAYOUT = {
   voice: [['Microphone', 'mic_level', 'noise_reduction'], ['Mute and wake sound removal', 'mute', 'do_not_disturb', 'wake_sound_removal'],
           ['Requests', 'wake_word_in_request', 'end_of_request', 'stop_ends_listening'], ['Timers', 'timer_ring', 'timer_sound', 'timer_stop_any']],
   wake: [['Engine', 'wake_engine'], ['How it hears you', 'speech_language', 'wake_word_adaptation']],
-  lights: [['Brightness', 'led_auto_brightness', 'led_brightness'], ['Position', 'ring_rotation', 'light_band', 'screen_clock'], ['Clock face', 'clock_face']],
+  lights: [['Brightness', 'led_auto_brightness', 'led_brightness'], ['Position', 'ring_rotation', 'light_band', 'screen_clock'], ['Clock face', 'clock_face', 'clock_dial', 'clock_background', 'clock_date']],
 };
 
 // help: what it does, in the user's terms.  ha: also in Home Assistant (true), or for features the entities it adds.
@@ -246,6 +246,9 @@ const HELP = {
   ring_rotation: { ha: true, help: 'Where the light ring\'s fill starts. Home Assistant\'s "Light ring fill" lights that share of the ring in the light\'s colour, for a timer\'s or a washing machine\'s progress or a battery; it fills the way the volume does, from where the volume starts. Turn the start by this many LEDs, so it starts where you want it to for how the Echo stands. Only where the Echo has room for each LED\'s own animations (Home Assistant then lists "Light ring fill"). Default 0.' },
   light_band: { help: 'The Echo Show has no light ring: it shows the ring\'s lights as a band along the bottom of the screen, as Alexa did. That is listening, thinking, mic off, calls, volume, timers and Home Assistant\'s "Light ring". This many pixels at the bottom are kept for it, so an app on the screen never has the band over it. 0 gives the whole screen to the apps and shows no band. Default 10, stock\'s line. On the Echo Spot\'s round screen the lights run around the rim instead, a ring this many pixels thick, over whatever is on the screen.' },
   clock_face: { ha: true, thumbs: true, help: 'The Echo Spot's own analog clock faces, read from its firmware where they lie (nothing downloaded, nothing copied), drawn in place of the digital clock while the clock is on: the face Amazon made for each design, with its background, its hands and the second hand ticking. In a dark room (or 21:00 to 07:00 where the light sensor says nothing) the night version, dimmed as stock's was. Digital is hassmic's own clock. Also a select in Home Assistant.' },
+  clock_dial: { ha: true, pretty: true, empty: 'Pick one of the analog faces above first', help: 'The hands and dial of the face above: each design comes with up to four of its own (Beach: Tapered, Duotone, Bold), and this picks one of them. A new face starts at the one Amazon made its default. Also a select in Home Assistant, listing the face's own dials.' },
+  clock_background: { ha: true, thumbs: 'bg', empty: 'Pick one of the analog faces above first', help: 'The picture behind the face above: each design has three to ten of its own (Beach: Ocean, Grass, Leaves, Sand, Flower). The night version stays dark whichever you pick, as stock's did. A new face starts at its default background. Also a select in Home Assistant.' },
+  clock_date: { ha: true, help: 'The face's date window, with the day of the month in it, where the face has one (most do: at 9, at 3 or at 12 o'clock). Off by default, as on a stock Spot. Also a switch in Home Assistant.' },
   screen_clock: { help: 'The Echo Spot\'s round screen shows the time, large in the middle, and the date under it, white on black, with the light ring round the rim over them; the screen stays on while it does, as the Spot\'s own clock face did. 24h, or 12h with AM and PM. Off leaves the screen dark and lets it sleep five minutes after the last light. The time and its zone come from Home Assistant.' },
   bluetooth_announcements: { help: 'Says "Connected to …" and "Disconnected from …" when a phone connects, in your voice assistant\'s voice, after the chime. Home Assistant speaks the words, and only once "Allow the device to perform Home Assistant actions" is ticked in this Echo\'s ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure); without it there is the chime only.' },
   bluetooth_announcement_language: { help: 'The language of those sentences. Home Assistant does not tell the Echo which language your voice assistant speaks, so pick the one that matches its voice.' },
@@ -422,6 +425,9 @@ const SUB = {
   light_band: 'Pixels for the band along the bottom of the screen, or the ring around a round one',
   screen_clock: 'The time and date on the round screen, 24 h or 12 h',
   clock_face: 'Digital, or one of the Spot's own analog faces',
+  clock_dial: 'Which of the face's dials and hands',
+  clock_background: 'Which of the face's backgrounds',
+  clock_date: 'The day of the month in the face's date window',
   bluetooth_announcements: 'Says when a phone connects or disconnects',
   bluetooth_announcement_language: 'The language of those sentences',
   sendspin_unpaired: 'Any Music Assistant server may play here',
@@ -978,9 +984,18 @@ function control(s, prefix = 's-') {
     r.oninput = paint; r.onchange = () => set(s.name, r.value);
     return { el: h('div', { class: 'slider' }, r, out), update: (x) => { if (!r.matches(':active')) { r.value = x.value; paint(); } } };     // not while dragging
   }
-  const names = CHOICE_NAMES[s.name] || {}, modes = (HELP[s.name] || {}).modes;
-  if ((HELP[s.name] || {}).thumbs) {    // pictures to pick from: the clock faces, each as Amazon's own picker showed it
-    const pretty = (c) => c.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase());
+  const names = CHOICE_NAMES[s.name] || {}, modes = (HELP[s.name] || {}).modes, info = HELP[s.name] || {};
+  const pretty = (c) => c.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase());
+  const shown = (c) => names[c] || (info.pretty ? pretty(c) : c);
+  if (!s.choices.length && info.empty) return { el: h('p', { class: 'help' }, info.empty), update: () => {} };   // nothing to pick yet
+  if (info.thumbs === 'bg') {           // the face's backgrounds, each by its own picture (the face picked: choice i of clock_face)
+    const face = settingValueIndex('clock_face');
+    const btns = s.choices.map((c, i) => h('button', { type: 'button', class: 'face', title: pretty(c), onclick: () => set(s.name, c) },
+      h('span', { class: 'thumb' }, h('img', { src: `/api/clockface/${face}/bg/${i}`, alt: '', loading: 'lazy' })), h('span', {}, pretty(c))));
+    return { el: h('div', { class: 'faces', role: 'group', 'aria-label': s.label }, btns),
+             update: (x) => btns.forEach((b, i) => { b.classList.toggle('on', i === x.value); b.setAttribute('aria-pressed', String(i === x.value)); }) };
+  }
+  if (info.thumbs) {    // pictures to pick from: the clock faces, each as Amazon's own picker showed it
     const btns = s.choices.map((c, i) => h('button', { type: 'button', class: 'face', title: pretty(c), onclick: () => set(s.name, c) },
       i ? h('span', { class: 'thumb' }, h('img', { src: '/api/clockface/' + i, alt: '', loading: 'lazy' })) : h('span', { class: 'digital' }, '12:00'),
       h('span', {}, i ? pretty(c) : 'Digital')));
@@ -1023,14 +1038,14 @@ function control(s, prefix = 's-') {
   }
   if (s.choices.length <= 4) {
     const { before, unavailable } = HELP[s.name] || {};          // a dialog (or a file to pick) first; one this Echo lacks greyed out
-    const btns = s.choices.map((c) => h('button', { type: 'button', onclick: async () => { if (!before || await before(c)) set(s.name, c); } }, act(names[c] || c)));
+    const btns = s.choices.map((c) => h('button', { type: 'button', onclick: async () => { if (!before || await before(c)) set(s.name, c); } }, act(shown(c))));
     return { el: h('div', { class: 'seg', role: 'group', 'aria-label': s.label }, btns),
              update: (x) => btns.forEach((b, i) => {
                b.classList.toggle('on', i === x.value); b.setAttribute('aria-pressed', String(i === x.value));
                b.disabled = !!(unavailable && unavailable(s.choices[i])); b.title = b.disabled ? 'Not in this Echo\'s firmware' : '';
              }) };
   }
-  const sel = h('select', { id, onchange: () => set(s.name, sel.value) }, s.choices.map((c) => h('option', { value: c }, names[c] || c)));
+  const sel = h('select', { id, onchange: () => set(s.name, sel.value) }, s.choices.map((c) => h('option', { value: c }, shown(c))));
   return { el: sel, update: (x) => { sel.value = s.choices[x.value]; } };
 }
 
@@ -1418,7 +1433,7 @@ function buildVolumes(el) {
 }
 
 function render() {
-  const sig = state.settings.map((s) => s.name).join() + '|' + !!state.arbitration + '|' + !!state.kiosk_app + '|' + !!state.screen, fresh = sig !== built;
+  const sig = state.settings.map((s) => s.name + (s.choices ? ':' + s.choices.join('/') : '')).join() + '|' + !!state.arbitration + '|' + !!state.kiosk_app + '|' + !!state.screen, fresh = sig !== built;
   if (fresh) { built = sig; build(); }
   for (const s of state.settings) { const c = controls.get(s.name); if (c) c.update(s); }
   for (const q of quick) { const s = state.settings.find((x) => x.name === q.name); if (s) q.update(s); }

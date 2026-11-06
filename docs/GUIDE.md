@@ -426,8 +426,13 @@ Beyond the README's two figures:
   and the date on the screen inside the ring, white on black, and keeps the screen on; the time and its zone are
   Home Assistant's. "Clock face" (Lights, a picture of each; also a select in Home Assistant) swaps that digital clock
   for one of the Spot's own analog faces, the ones Alexa's clock offered (Abstract shapes, Beach, Zen and the rest):
-  each design's default face on its default background, with a ticking second hand, and its night version (dimmed
-  colours, the background dark) when the Spot's light sensor says the room is dark. The screen's brightness follows the
+  each design's own dials and backgrounds, a ticking second hand, and its night version (dimmed colours, the
+  background dark) when the Spot's light sensor says the room is dark. Under it, "Clock dial" picks one of the
+  design's dials (up to four: Beach has Tapered, Duotone and Bold), "Clock background" one of its backgrounds (three to
+  ten, each shown by its picture: Beach's Ocean, Grass, Leaves, Sand, Flower), and "Date on the clock face" shows the
+  day of the month in the face's date window, where it has one; all three are in Home Assistant too (the dial and
+  background selects list the face's own, so picking another face makes Home Assistant read the Echo's entities
+  again, which takes a few seconds). A new face starts at its own default dial and background. The screen's brightness follows the
   room too (Android's own auto brightness on that sensor, as on a stock Spot). hassmic draws them from the
   firmware's own clock-face package where it lies: nothing is downloaded or copied, and Alexa's clock app stays off.
   Notifications, the date window and Alexa's alerts on the faces are left out, and so are Photos and the four

@@ -130,7 +130,8 @@ enum { KEY_NOISE = 2, KEY_MIC_LEVEL, KEY_MULT, KEY_MUTE, KEY_WAKE_SOUND, KEY_SEN
        KEY_UPDATE_CHANNEL, KEY_UPDATE, KEY_WHISPERED, KEY_ARB_HANDOFF, KEY_WEB_URL, KEY_IDENTIFY, KEY_RESET,
        KEY_TIMER_RINGING, KEY_TIMER_NAMES, KEY_DROPIN_SERVICE, KEY_DROPIN_STATE, KEY_DROPIN_PEER, KEY_DROPIN_END, KEY_RESTART,
        KEY_DROPIN_RESULT, KEY_TIMER_STOP, KEY_BUTTON, KEY_LIGHT, KEY_ASSIST_VOLUME, KEY_SOUNDS_VOLUME, KEY_TIMER_VOLUME,
-       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_LAST_HEARD, KEY_LAST_REPLY, KEY_CLOCK_FACE };
+       KEY_CALL_VOLUME, KEY_WAKE, KEY_RING_FILL, KEY_RING_ROTATION, KEY_RING_LEDS, KEY_LAST_HEARD, KEY_LAST_REPLY, KEY_CLOCK_FACE,
+       KEY_CLOCK_DIAL, KEY_CLOCK_BG, KEY_CLOCK_DATE };
 enum { MP_KEY = 1, MP_IDLE = 1, MP_PLAYING = 2, MP_CMD_STOP = 2, MP_CMD_MUTE = 3, MP_CMD_UNMUTE = 4 };
 #define MEDIA_RATE 48000        /* what we ask Home Assistant to transcode announcements and media to: WAV mono s16 */
 
@@ -368,6 +369,21 @@ static void face_label(int i, char *out, size_t cap)
     out[0] = (char)toupper((unsigned char)out[0]);
 }
 
+/* the face's dials or backgrounds (dial: clockface_dial_names, else _background_names) the same way: "botanical_white" ->
+ * "Botanical white"; n 0 on the digital clock */
+static const char *const *face_parts(int dial, int *n)
+{
+    int f = ring_band_face(-1); *n = 0;
+    if (f <= 0) return NULL;
+    return dial ? clockface_dial_names(f - 1, n) : clockface_background_names(f - 1, n);
+}
+static void part_label(const char *name, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", name ? name : "");
+    for (char *c = out; *c; c++) if (*c == '_') *c = ' ';
+    out[0] = (char)toupper((unsigned char)out[0]);
+}
+
 static void send_setting(int key)       /* lock held */
 {
     if (!listed(key)) return;
@@ -383,6 +399,13 @@ static void send_setting(int key)       /* lock held */
     case KEY_DENOISE: pb_str(&b, 2, denoise_names[core_mic_denoise(-1)]); send_state(SELECT_STATE, &b); break;
     case KEY_BT_LANG: if (ble_present()) { pb_str(&b, 2, settings_bt_lang()->name); send_state(SELECT_STATE, &b); } break;
     case KEY_CLOCK_FACE: { char l[40]; face_label(ring_band_face(-1), l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); break; }
+    case KEY_CLOCK_DIAL: case KEY_CLOCK_BG: {
+        int n, dial = key == KEY_CLOCK_DIAL, v = dial ? ring_band_dial(-2) : ring_band_background(-2);
+        const char *const *p = face_parts(dial, &n); char l[64];
+        if (v < 0 || v >= n) break;
+        part_label(p[v], l, sizeof l); pb_str(&b, 2, l); send_state(SELECT_STATE, &b); break;
+    }
+    case KEY_CLOCK_DATE: pb_uint(&b, 2, ring_band_date(-1)); send_state(SWITCH_STATE, &b); break;
     case KEY_EQ_BASS: case KEY_EQ_MID: case KEY_EQ_TREBLE: pb_float(&b, 2, core_eq(key - KEY_EQ_BASS)); send_state(NUMBER_STATE, &b); break;
     case KEY_ARB_JOIN: if (arb_running()) { pb_uint(&b, 2, arb_arbitrate(-1)); send_state(SWITCH_STATE, &b); } break;
     case KEY_ARB_PEERS: if (arb_running()) { pb_float(&b, 2, arb_peers()); send_state(SENSOR_STATE, &b); } break;
@@ -508,6 +531,7 @@ static void send_light_states(void)     /* lock held */
     sent_level = core_led_brightness(-1); level_at = time(NULL);
     send_setting(KEY_LED_AUTO); send_setting(KEY_LED_BRIGHTNESS); send_setting(KEY_LIGHT);
     send_setting(KEY_RING_FILL); send_setting(KEY_RING_ROTATION); send_setting(KEY_CLOCK_FACE);
+    send_setting(KEY_CLOCK_DIAL); send_setting(KEY_CLOCK_BG); send_setting(KEY_CLOCK_DATE);
 }
 
 static void send_light_entities(void)
@@ -536,6 +560,19 @@ static void send_light_entities(void)
       pb_str(&b, 1, "clock_face"); pb_fixed32(&b, 2, KEY_CLOCK_FACE); pb_str(&b, 3, "Clock face"); pb_str(&b, 5, "mdi:clock-outline");
       for (int i = 0; i < n && b.n < 1536 - 48; i++) { face_label(i, l, sizeof l); pb_str(&b, 6, l); }
       pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b); }
+    /* that face's own dials and backgrounds (listed only for an analog face: their options are the face's, so a new face
+     * lists them again, settings.c) and its date window */
+    for (int dial = 1; dial >= 0; dial--) {
+        int key = dial ? KEY_CLOCK_DIAL : KEY_CLOCK_BG, n; const char *const *p = face_parts(dial, &n); char l[64];
+        if (!listed(key)) continue;
+        PB(b, 1024);
+        pb_str(&b, 1, dial ? "clock_dial" : "clock_background"); pb_fixed32(&b, 2, key);
+        pb_str(&b, 3, dial ? "Clock dial" : "Clock background"); pb_str(&b, 5, dial ? "mdi:clock-time-four-outline" : "mdi:image-outline");
+        for (int i = 0; i < n && b.n < 1024 - 72; i++) { part_label(p[i], l, sizeof l); pb_str(&b, 6, l); }
+        pb_uint(&b, 8, 1); send_msg(LIST_SELECT, &b);
+    }
+    if (listed(KEY_CLOCK_DATE)) { PB(b, 160); pb_str(&b, 1, "clock_date"); pb_fixed32(&b, 2, KEY_CLOCK_DATE);
+      pb_str(&b, 3, "Date on the clock face"); pb_str(&b, 5, "mdi:calendar-today"); pb_uint(&b, 8, 1); send_msg(LIST_SWITCH, &b); }
     if (listed(KEY_LUX)) { PB(b, 192); pb_str(&b, 1, "illuminance"); pb_fixed32(&b, 2, KEY_LUX); pb_str(&b, 3, "Illuminance"); pb_str(&b, 6, "lx");
           pb_uint(&b, 7, 0); pb_str(&b, 9, "illuminance"); pb_uint(&b, 10, 1); send_msg(LIST_SENSOR, &b); }
     if (have_auto) {
@@ -581,6 +618,8 @@ static int listed(int key)
     case KEY_LIGHT: return ring_custom();
     case KEY_RING_FILL: case KEY_RING_ROTATION: case KEY_RING_LEDS: return ring_per_led();
     case KEY_CLOCK_FACE: return settings_find("clock_face") != NULL;
+    case KEY_CLOCK_DIAL: case KEY_CLOCK_BG: case KEY_CLOCK_DATE:
+        return settings_find("clock_face") != NULL && ring_band_face(-1) > 0;
     case KEY_CALL_VOLUME: if (!(dropin_running() && settings_on("drop_in"))) return 0;    /* calls only with Drop In */
         /* fall through */
     case KEY_ASSIST_VOLUME: case KEY_SOUNDS_VOLUME: case KEY_TIMER_VOLUME:       /* one that follows the music has none */
@@ -731,6 +770,15 @@ static void on_setting(unsigned type, const unsigned char *p, const unsigned cha
         for (int i = 0; i < n; i++) { face_label(i, l, sizeof l); if (!strcmp(opt, l)) { settings_set("clock_face", names[i], e, sizeof e); return; } }
         return;
     }
+    else if (type == SELECT_COMMAND && (key == KEY_CLOCK_DIAL || key == KEY_CLOCK_BG)) {
+        int n; const char *const *p = face_parts(key == KEY_CLOCK_DIAL, &n); char l[64], e[80];
+        for (int i = 0; i < n; i++) {
+            part_label(p[i], l, sizeof l);
+            if (!strcmp(opt, l)) { settings_set(key == KEY_CLOCK_DIAL ? "clock_dial" : "clock_background", p[i], e, sizeof e); return; }
+        }
+        return;
+    }
+    else if (type == SWITCH_COMMAND && key == KEY_CLOCK_DATE && listed(key)) { char e[80]; settings_set("clock_date", on ? "on" : "off", e, sizeof e); return; }
     else if (type == SELECT_COMMAND && key == KEY_BT_LANG) { for (int i = 0; i < bt_lang_count; i++) if (!strcmp(opt, bt_langs[i].name)) settings_bt_lang_index(i); }
     else if (type == NUMBER_COMMAND && key == KEY_MIC_LEVEL) {
         char v[16], e[80]; int l = num < MICGAIN_LEVEL_MIN ? MICGAIN_LEVEL_MIN : num > MICGAIN_LEVEL_MAX ? MICGAIN_LEVEL_MAX : (int)lroundf(num);
