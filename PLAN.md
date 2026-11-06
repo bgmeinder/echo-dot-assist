@@ -3108,9 +3108,14 @@ Run in this order. Each step says what it proves.
       faces' night; Beach's day version came up with the lights on (screenshot).  The backlight: device.conf had
       Android's brightness manual at 120 of 255 (half in a dark room, #126's complaint on the Show 5); Android's auto
       mode on the same sensor (screen_brightness_mode=1) follows within 3 s: 38 lit, 1 dark, which looked right at
-      night by the owner's eye.  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (28 options)
-      switches within a second; screenshots of Abstract shapes and Beach at night (2026-11-06).  Not yet: the faces by
-      day seen on the device, a template's other faces and backgrounds (clockface_styles/colors exist, no setting).
+      night by the owner's eye.  Measured on the Spot: the renderer 2 % CPU while it ticks; HA's select (23 options)
+      switches within a second; screenshots of Abstract shapes and Beach at night, Beach by day (2026-11-06).  Not yet:
+      a template's other faces and backgrounds (clockface_styles/colors exist, no setting); the settings page's
+      picker seen in a browser.
+      To do: rook's lux in true lux.  The OPT3001 behind the dark glass reads some 1/100-1/1000 of the room's light,
+      so HA's Illuminance is not comparable with other sensors.  A scale factor (a board field multiplying what
+      core_lux reads, lux_dark then on the true scale) from one reading beside a reference (a phone's light meter on
+      the Spot's top, or a sensor in the same room) with the lights on.
       (toybox's `date` first on PATH, the check both ways now).  Not yet: the screen wake (`service call power 9 i64`
       does not exist on 5.1: the band draws on a dark screen), the clock-sync property's SELinux rule, a CA bundle for
       HTTPS, the guided setup (`setup.sh` is crown's copy), the 3.5 mm jack.
