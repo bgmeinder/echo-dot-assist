@@ -55,6 +55,12 @@ Device binaries need the NDK and the unpacked firmware in `firmware/<codename>/`
 `uv sync` ([uv](https://docs.astral.sh/uv/)) makes `.venv` from `uv.lock`, every package pinned; to change one, edit
 `pyproject.toml`, run `uv lock` and commit both.
 
+On a PC without the NDK or qemu (Windows), `tools/devenv/devenv.sh` builds and tests in a container, on a local or a
+remote Docker engine: `image` once, `sync` to copy the checkout into its volume, `run make DEVICE=<codename>`,
+`test make unit` (as an ordinary user: three checks fail for root), `fetch` to bring `build/` back. The script's head
+lists the rest. It is a second way beside the workflow under [nektos/act](#ci-and-releases) below: that one replays
+CI, this one is for working on a model.
+
 ```sh
 make [DEVICE=donut]                               # ARM binaries into build/donut/
 make DEVICE=donut STUBS=1                         # the same, without the firmware: stand-ins for its libraries
