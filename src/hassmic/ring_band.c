@@ -455,6 +455,15 @@ static void screen_wake(void)
 static void screen_timeout(int ms)
 {
     char v[16]; snprintf(v, sizeof v, "%d", ms);
+    if (sdk_level() && sdk_level() < 23) {
+        /* Android 5.1 (rook): its settings provider refuses the settings tool run as hassmic's user ("null from uid
+         * 1000 not allowed to perform WRITE_SETTINGS", a stack trace in boot.log at every start), and the timeout would
+         * not reach the power manager there anyway (clock_tick).  The screen sleeps by device.conf's
+         * ANDROID_SETTINGS (5 min, root writes it); the clock keeps it on by userActivity */
+        static int told;
+        if (!told++) fprintf(stderr, "band: the screen's timeout left to Android's setting (5.1 refuses it to hassmic)\n");
+        return;
+    }
     char *argv[] = { "/system/bin/settings", "put", "system", "screen_off_timeout", v, NULL };
     run_quiet(argv);
     fprintf(stderr, "band: the screen sleeps after %d s\n", ms / 1000);
