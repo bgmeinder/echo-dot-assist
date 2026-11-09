@@ -112,18 +112,17 @@ the three named schematics; it's most likely the filing's 4th, generic "Schemati
 **Revised on a real unit (2026-11-09): the Mic Board and Power Board appear to have been consolidated into one
 double-sided board** on the revision found in an actual Echo Plus (`PCB 30-002504 REV 01`, vs. the 2017 FCC photos'
 separate `30-002335` Mic Board). One face has the TM/TP test array, the TPA3130D2 amp and the `J21` ribbon; the other
-face — confirmed by the person with the unit in hand, directly opposite the ribbon connector's position — has the
-big electrolytic-capacitor cluster, a shield can, and a small connector in roughly `J22`'s expected spot that may be
-the micro-USB. This would mean the two separate 2017-era boards got merged into a single board on this hardware
-revision — itself a real, useful finding (further evidence of the "Sonar V2" redesign `audio_device.xml` already
-hinted at), not just a correction of an earlier misreading of the photos.
+face has the big electrolytic-capacitor cluster and a shield can. This would mean the two separate 2017-era boards
+got merged into a single board on this hardware revision — itself a real, useful finding (further evidence of the
+"Sonar V2" redesign `audio_device.xml` already hinted at), not just a correction of an earlier misreading of the
+photos.
 
-**Not yet confirmed: whether that connector is actually a micro-USB-B shell.** The FCC photos' micro-USB was a
-5-contact, metal-shelled connector with a narrow slot opening; a close, well-lit photo of just that connector (ideally
-with something for scale, or literally trying whether a micro-USB cable end physically seats in it) is the next thing
-needed before calling it confirmed — in the single photo seen so far of that face, the clearest candidate was a small
-white 4-pin connector, which reads more like a JST-style wire connector (common for battery/sensor leads) than a USB
-shell, but the framing didn't give a clean, close view of it.
+**No micro-USB found on this board.** Every connector candidate on the capacitor-cluster face was checked close up
+and ruled out (2026-11-09): what looked like it might be the connector was actually a shielded power inductor (`4R7`,
+part of a DC-DC regulator stage), and the two real connectors nearby are the tweeter and woofer outputs. This board's
+full inventory is `J21` (ribbon in), `ME2`/`ME3` (mic elements), tweeter out, woofer out — audio only, no USB. See
+"On a real unit" further below for what this means for where to look next (the Main Logic Board's `J1100`/`J1101`
+headers).
 
 **A second, possibly better lead**: the Main Logic Board itself — the one with the SoC — has its own **`J1101`
 "JTAG 2L" header and `J1100` "JAWFISH DEBUG" header**, soldered connectors (not bare pads either, going by the
@@ -203,18 +202,30 @@ and mic-element connectors `ME2`/`ME3` that weren't legible in the lower-resolut
 
 **Correction: the "second board" is the flip side of the same board, not a separate one.** On this revision the Mic
 Board and Power Board appear to have been merged into a single double-sided PCB (see the corrected table entry
-above): the TM/TP/amp face is one side, and directly opposite the `J21` ribbon connector's position on the other
-side sits the capacitor cluster, a shield can, and a small connector in roughly where `J22` should be. Whether that
-connector is actually the micro-USB-B shell isn't confirmed yet — the one photo of that face so far didn't give a
-clean enough view to tell it apart from a small JST-style wire connector sitting nearby. A close, well-lit photo of
-just that one connector (or literally trying whether a micro-USB cable seats in it) is the next thing needed.
+above): the TM/TP/amp face is one side, the capacitor-cluster/shield-can face is the other.
+
+**No micro-USB found on this board, after checking every connector candidate on the capacitor-cluster face
+(2026-11-09).** Three candidates were identified and photographed close up; all three ruled out:
+- The component initially taken for it was a shielded power inductor (marked `4R7` = 4.7 µH, part of a DC-DC
+  switching regulator stage next to chip `U14`) — a passive component with solder pads, not a connector at all.
+- The small white 4-pin connector is the **tweeter** connector.
+- The small black 2–3 pin connector is the **woofer** connector.
+
+So this double-sided board's full connector inventory, confirmed, is: `J21` (ribbon to the Main Logic Board),
+`ME2`/`ME3` (mic elements), tweeter out, woofer out — **audio in and out, nothing that looks like data I/O**. Either
+this revision's consolidated board dropped the micro-USB the 2017 FCC unit's separate Power Board had, or that
+connector sits on a board further into the stack that hasn't been reached yet (the Main Logic Board, near the top of
+the unit by the volume ring, is still unexplored). The realistic next lead is the Main Logic Board's `J1100`
+("JAWFISH DEBUG") and `J1101` ("JTAG 2L") headers — confirmed in the 2017 photos, and a debug/test header is more
+likely than a USB port to survive a board redesign, since it's for the manufacturing line rather than the product's
+own exposed feature set.
 
 Open, in order:
 
-1. **Get a clear, close-up look at the specific connector opposite `J21`.** Does it have a metal shell with a narrow
-   slot opening and roughly 5 contacts (micro-USB-B), or does it look more like a small plastic-bodied wire connector
-   (JST-style, for a battery or sensor lead)? If it's genuinely not USB: the realistic fallback is the Main Logic
-   Board's `J1100`/`J1101` headers, or pad-tracing the way radar/donut do.
+1. **Continue into the stack toward the Main Logic Board.** The amp/mic board is done — its only connector onward is
+   `J21`/the ribbon that led here, back toward the rest of the unit. Follow that path further in (toward the volume
+   ring/LED assembly near the top) rather than assuming the base end of the stack has anything more to give; the
+   `J1100`/`J1101` headers are the next thing to look for once the Main Logic Board itself is in view.
 2. **Confirm the board matches `FIRMWARE_BUILD`** before doing anything irreversible: the FCC internal photos are
    from the original 2017 certification (report dated via `EP693034-02`); the PCB revision mismatch already found
    (`30-002335`/two boards vs. `30-002504`/one double-sided board) is itself evidence this unit postdates that
