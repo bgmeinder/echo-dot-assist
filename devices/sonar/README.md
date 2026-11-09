@@ -142,22 +142,39 @@ devices/README.md already states ("pin the firmware before it ever reaches Amazo
 No Echo Plus 1st gen/`sonar`-specific unlock thread or tool was found in this search (2026-11-09) — only the general
 MT8163 exploit class and tooling that other models here already use.
 
-**What's not yet answered**: exactly how to mechanically reach either board from outside the assembled speaker. The
-bottom cap (4 screws, visible in the first internal-photo page) only exposes the speaker driver's ribbon cable, not
-the Main Logic or Combo boards — those sit further up inside the cylindrical housing, meaning a fuller teardown
-(removing the fabric sleeve and/or the board stack from the shell) is needed, the way any cylindrical Echo/Dot
-teardown works (Brian Dorey's public Echo Dot/Echo Input teardowns show the general construction style, though not
-this specific model, and no Echo Plus 1st gen-specific teardown write-up was found in a search done 2026-11-09). This
-is an ordinary non-destructive disassembly question, not a soldering one.
+**Good news on the mechanical side too**: iFixit has an "Amazon Echo 2nd Generation Speaker Replacement" guide
+([ifixit.com/Guide/.../114550](https://www.ifixit.com/Guide/Amazon+Echo+2nd+Generation+Speaker+Replacement/114550))
+for the standard Echo 2nd gen — a different internal board generation from sonar (see the `radar` comparison above),
+but the **same external shell family** (same year, same cylindrical body shape), so its base-removal sequence is a
+strong starting expectation, not proof:
+
+1. **Peel/pop the rubber pad off the bottom.** The guide describes a small indent ("crater") under the pad: press it
+   with a thumb while lifting the pad off with the other hand — no prying tool implied, though a spudger helps if it
+   resists.
+2. **Remove four small Torx security screws** (the guide says 8.0 mm T8/TR8 — a security-Torx bit, not a plain Torx,
+   is likely needed) holding a lid under the pad.
+3. **Lift that lid off.** On the standard Echo 2nd gen, this immediately exposes what iFixit calls the **"AMP
+   Board"** — connected to the rest of the stack by a ZIF ribbon connector (flip up its small latch with a spudger
+   before pulling the ribbon) and a separate 2-wire connector (unclips by lifting a small flap on one side). **This
+   is the same role as sonar's Combo Board** (power + amplifier, per the FCC schematic naming) — if the construction
+   really matches, the board with the populated micro-USB `J22` may be the very first thing visible after just the
+   rubber pad and 4 small screws, not a deep teardown.
+4. Going further (not needed just for USB access, only if reaching the Mic Board, Main Logic Board or the volume-ring
+   assembly turns out to be necessary): four larger 30.0 mm T8 screws in the corners free a plastic piece over the
+   subwoofer magnet; the guide warns it's a strong magnet, keep it away from other electronics and unshielded wires.
+
+Treat this as the best available map, not a confirmed one for this specific model: sonar's AMP-equivalent board (the
+Combo Board) could be sized, shaped, or positioned differently given it also carries the Zigbee-adjacent antenna
+routing the plain Echo 2nd gen doesn't have, and the Combo Board's two-board arrangement (Combo + Mic, where the
+plain Echo may only have one) needs confirming once a unit is actually open. No teardown guide specific to the Echo
+Plus itself was found (2026-11-09).
 
 Open, in order:
 
-1. **Open the case far enough to reach the Combo Board's `J22` and/or the Main Logic Board's `J1100`/`J1101`.**
-   Likely: the 4 screws under the bottom cap release the acoustic driver/base assembly; the board stack sits above
-   it, reachable once that's out of the way — five boards connected by ribbons and headers (see the table above), so
-   expect to work through more than one connector, not just lift a single board out. No teardown guide specific to
-   this model is linked here yet; the general Echo-speaker disassembly pattern (iFixit, Brian Dorey's site) is well
-   documented even where this exact model isn't, and is the thing worth reading before improvising.
+1. **Try the Echo-2nd-gen sequence above**: rubber pad off, 4 small T8/TR8 security screws, lift the lid — check
+   whether that reaches the Combo Board (`J22`) directly, the way it does on the plain Echo 2nd gen. If the first
+   board found doesn't match the Combo Board's description (big electrolytic caps, `J22` micro-USB, `J1102`, `P1`),
+   stop and reassess rather than assuming the sequence keeps matching deeper into the stack.
 2. **Confirm the board matches `FIRMWARE_BUILD`** before doing anything irreversible: the FCC internal photos are
    from the original 2017 certification (report dated via `EP693034-02`); a later hardware revision could differ
    (the firmware's own `audio_device.xml` already hints at a second "Sonar V2" speaker revision — see board.c). A
