@@ -178,9 +178,23 @@ process (does it stay consistent unit to unit, is there a less-glued edge to sta
 adding here once there's a second data point.
 
 Once off: a ribbon connects the base assembly to the board behind it (matching the FCC internal photos' first page,
-which showed exactly this — the bottom cap's ribbon cable and a small board visible through the opening). What that
-ribbon is and whether it needs disconnecting is the next thing to confirm against the FCC photos (and this file's
-own table above) rather than assume.
+which showed exactly this — the bottom cap's ribbon cable and a small board visible through the opening). The ribbon
+was disconnected (ZIF latch) and that first board removed for a look.
+
+**It is not the Combo Board, and not any board the FCC photos showed at all.** Silkscreened **`PCB 30-002504 REV
+01`** — a part number that doesn't match the Mic Board's `30-002335` or anything else visible across the FCC's 8
+photo pages — and **no micro-USB connector on it**. Two live possibilities, not yet distinguished:
+
+1. This is simply a board the FCC's 8-page photo set never photographed (the exhibit may not be exhaustive — nothing
+   says those 8 pages are every board in the unit, only the ones the lab chose to shoot), and the Combo Board with
+   `J22` is still further into the stack, behind this one.
+2. This unit is a hardware revision the 2017 FCC filing never saw — consistent with `audio_device.xml`'s own "Sonar
+   V2" comment already noted in this file (a redesigned speaker/amp section). If so, **the populated micro-USB this
+   whole section was built around may not exist on this specific unit's revision at all**, and the realistic fallback
+   becomes the Main Logic Board's `J1100`/`J1101` headers instead, or pad-tracing the way radar/donut do.
+
+Next: identify this board properly (chip markings, what else is on it, where its own connectors lead) before
+guessing further, and keep going into the stack — the Combo Board, if it's there, is further in.
 
 Open, in order:
 
