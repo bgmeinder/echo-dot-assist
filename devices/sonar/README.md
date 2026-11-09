@@ -77,44 +77,68 @@ amonet-crown, etc.) — this needs searching for one, or building an amonet-styl
 partition layout (`seccfg`/`boot` offsets from its GPT) if none exists. That is the gating step before anything else
 in this directory can move from draft to checked.
 
-## USB access (likely needed before anything else)
+## USB access — good news: this one may have a real connector, not test pads
 
-rook and crown both have a screen and an exposed micro-USB port (behind a plastic cover), so amonet's BootROM exploit
-on those runs by holding a button combo and plugging straight into it — no disassembly. `sonar` is shaped like
-`donut` instead: a cylindrical speaker, headless, no screen, and (same as every Dot-shaped Echo so far) no exposed
-USB socket on the outside.
+Originally assumed (2026-11-09, earlier in this file's history) to need donut-style pad soldering, since sonar looks
+like a cylindrical, headless Dot rather than rook/crown's screened devices with an exposed port. **That assumption
+was wrong**, corrected the same day by going straight to the source instead of guessing from the case shape: Amazon's
+own FCC filing for this device.
 
-`donut`'s own README documents exactly this situation for the Echo Dot 3: *"The Echo Dot 3 has no USB socket; its USB
-data lines end on test pads on the main board. The case has to be opened and a USB cable soldered to those pads"*
-(`TM3`/`TM4`/`TM5` = GND/D−/D+, VCC left unconnected — the Echo runs off its own power adapter, never USB power).
-`sonar` is expected to need the same kind of access, **but not necessarily the same pads**: it is a different main
-board (2017 Echo Plus 1st gen vs. 2018 Echo Dot 3), almost certainly its own silkscreen numbering and physical
-layout, even though both are MT8163 (rook, crown) / MT8516 (donut) family parts with a BROM-level USB download mode.
-Donut's `TM3`/`TM4`/`TM5` numbers should **not** be assumed to carry over or even to exist on sonar's board.
+FCC ID **2AHUF-6294** is this exact model (confirmed: registered grantee Amazon.com Services LLC, product code 6294,
+its own "User Manual" exhibit matches model ZE39KL) — [fccid.io/2AHUF-6294](https://fccid.io/2AHUF-6294). Its
+**Internal Photos exhibit** (`EUT Photo_Internal`, a public, unconfidential document — FCC requires board photos be
+released even when schematics are held confidential long-term, which they are here) is a genuine teardown: 8 pages of
+board photography with a ruler for scale, taken by the test lab (SPORTON International) for the original 2017
+certification. Downloaded and rendered to check, 2026-11-09:
+
+- **The main logic board (the one the rest of the stack connects to, PCB silkscreen area near its edge) has a
+  populated micro-USB receptacle, silkscreened `J22`** — a real, soldered-on micro-USB-B connector, not a bare pad.
+  Visible plainly in the photos: 5 contacts, standard micro-B shell, sitting right next to a cluster of bulk
+  capacitors and an RF shield can. This is the same kind of connector rook/crown already have exposed through their
+  case — sonar's is just inside the housing rather than behind an external flap.
+- The board stack is three boards (matching the FCC filing's separate "Main Logic Board_Schematics", "Combo
+  Board_Schematics" and "Mic Board_Schematics" exhibits): the main logic board (`J22` USB, the SoC, a 3-pin header
+  marked near a button `S2`), a second board under an RF shield (the Wi-Fi/BT combo module — almost certainly the
+  BCM43569A2 confirmed in the unpacked firmware), and a third board (silkscreened `PCB: 30-002335 REV 01`) carrying a
+  **large number of labelled test points** (`TM2`...`TM50`, `TP1`...`TP105`, a jumper `SHRT19`, a button `S2`) — this
+  looks like the manufacturing test/debug board, not where the USB lines are; the `J22` USB connector is the one to
+  use, not these TM/TP pads (which are far more numerous than a simple D+/D−/GND triplet and are more likely factory
+  test contacts for RF/audio bring-up, unrelated to a BootROM download mode).
+- **What's not yet answered**: exactly how to mechanically reach the board with `J22` from outside the assembled
+  speaker. The bottom cap (4 screws, visible in the first internal-photo page) only exposes the speaker driver's
+  ribbon cable, not the main board — the board stack with `J22` sits further up inside the cylindrical housing,
+  meaning a fuller teardown (removing the fabric sleeve and/or the board stack from the shell) is needed, the way any
+  cylindrical Echo/Dot teardown works (Brian Dorey's public Echo Dot/Echo Input teardowns show the general
+  construction style, though not this specific model). This is an ordinary non-destructive disassembly question, not
+  a soldering one.
 
 Open, in order:
 
-1. **Look for a public teardown or unlock project first.** The fast path here — the way donut's `kamakiri-donut` and
-   rook's `amonet-rook` XDA threads already did the pad-finding and exploit work — is finding out whether someone
-   has already mapped the Echo Plus 1st gen's board (XDA, a teardown blog, an existing amonet config for `sonar`).
-   Not confirmed to exist yet; worth a dedicated search before opening a unit.
-2. **If nothing exists, open the case and find the pads by hand**: same process as whoever reverse-engineered
-   donut's — open the case (teardown guide if one turns up), trace the SoC's USB D+/D− lines out (continuity from a
-   known reference point, e.g. a component with a public pinout, back to candidate test pads), confirm GND.
-3. **Confirm the board matches `FIRMWARE_BUILD`** before soldering anything irreversible: a board revision mismatch
-   (the Plus 1st gen shipped across a few hardware years) could mean the pad layout, or even the SoC generation,
-   differs from what the firmware alone suggests.
-4. Only once wired: the BROM-entry mechanism itself (hold the right key while plugging in the power adapter, as
-   donut's and rook's docs describe) is expected to be the same MT8163/MT8516-family behaviour documented for every
-   other model here — that part is not the open question, the pads are.
+1. **Open the case far enough to reach `J22`.** Likely: the 4 screws under the bottom cap release the acoustic
+   driver/base assembly; the main board sits in the stack above it, reachable once that's out of the way. No teardown
+   guide specific to this model is linked here yet — worth a short search (iFixit, Brian Dorey's site, XDA) before
+   improvising, since the general Echo-speaker disassembly pattern is well documented even where this exact model
+   isn't.
+2. **Confirm the board matches `FIRMWARE_BUILD`** before doing anything irreversible: the FCC internal photos are
+   from the original 2017 certification (report dated via `EP693034-02`); a later hardware revision could differ
+   (the firmware's own `audio_device.xml` already hints at a second "Sonar V2" speaker revision — see board.c). A
+   mismatched board doesn't change the USB connector story but could change which stock libraries/offsets apply.
+2b. If `J22` turns out to be unreachable without real disassembly risk, the FCC schematics exhibits
+   ("Main Logic Board_Schematics", confidential/metadata-only on fccid.io as of 2026-11-09) would have the definitive
+   pinout if they're ever released — check their status before falling back to pad-tracing by continuity.
+3. Once wired: the BROM-entry mechanism itself (hold the right key while plugging in the power adapter, as rook's and
+   donut's docs describe) is expected to be the same MT8163-family behaviour documented for every other model here —
+   that part is not the open question anymore, finding the connector was.
 
 ## What's still open
 
 devices/README.md's porting order, from the top:
 
-1. **Unlock and root** — no known public project; USB access needs opening the case and finding test pads (see "USB
-   access" above, unlike rook/crown's exposed port); MT8163 BootROM-exploit class expected, unconfirmed on this unit.
-   Not started at all; everything below this line is firmware-only analysis, none of it run.
+1. **Unlock and root** — no known public project; a teardown is needed to reach the main board's `J22` micro-USB
+   connector (confirmed to exist via the FCC internal-photos exhibit, see "USB access" above — likely no soldering
+   needed after all, unlike the earlier donut-style assumption), but the exact disassembly steps to get there aren't
+   written down yet; MT8163 BootROM-exploit class expected, unconfirmed on this unit. Not started on real hardware;
+   everything below this line is firmware/public-document analysis, none of it run.
 2. ~~Unpack the system partition on the PC~~ — done 2026-11-09 (`firmware/sonar/rootfs`, `rootfs_ramdisk`).
 3. **Fill in `device.conf`/`board.c`/`device.mk` TODOs** — well along from the unpacked firmware alone (PROBE_FILES,
    Wi-Fi/BT chip and patch file, wake word manifest, earcon folder, LED ring, speaker gain control, thermal zone,
