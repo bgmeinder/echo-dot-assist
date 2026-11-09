@@ -169,6 +169,19 @@ routing the plain Echo 2nd gen doesn't have, and the Combo Board's two-board arr
 plain Echo may only have one) needs confirming once a unit is actually open. No teardown guide specific to the Echo
 Plus itself was found (2026-11-09).
 
+**On a real unit (2026-11-09): the base came off much harder than the iFixit sibling guide suggests.** Not a simple
+thumb-press release — it was heavily glued, and came off only with repeated heat-and-pry passes around the seam
+(a heat gun/hair dryer softening the adhesive a little at a time, prying gently further along the seam each pass,
+repeated around the full circumference rather than forcing one spot). Thicker and more stuck than the plain Echo 2nd
+gen's pad-and-crater description. Budget real time for this step and go slowly; a few more data points from the same
+process (does it stay consistent unit to unit, is there a less-glued edge to start the pry from) would be worth
+adding here once there's a second data point.
+
+Once off: a ribbon connects the base assembly to the board behind it (matching the FCC internal photos' first page,
+which showed exactly this — the bottom cap's ribbon cable and a small board visible through the opening). What that
+ribbon is and whether it needs disconnecting is the next thing to confirm against the FCC photos (and this file's
+own table above) rather than assume.
+
 Open, in order:
 
 1. **Try the Echo-2nd-gen sequence above**: rubber pad off, 4 small T8/TR8 security screws, lift the lid — check
