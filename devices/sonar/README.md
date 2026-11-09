@@ -91,52 +91,68 @@ released even when schematics are held confidential long-term, which they are he
 board photography with a ruler for scale, taken by the test lab (SPORTON International) for the original 2017
 certification. Downloaded and rendered to check, 2026-11-09:
 
-- **The main logic board (the one the rest of the stack connects to, PCB silkscreen area near its edge) has a
-  populated micro-USB receptacle, silkscreened `J22`** — a real, soldered-on micro-USB-B connector, not a bare pad.
-  Visible plainly in the photos: 5 contacts, standard micro-B shell, sitting right next to a cluster of bulk
-  capacitors and an RF shield can. This is the same kind of connector rook/crown already have exposed through their
-  case — sonar's is just inside the housing rather than behind an external flap.
-- The board stack is three boards (matching the FCC filing's separate "Main Logic Board_Schematics", "Combo
-  Board_Schematics" and "Mic Board_Schematics" exhibits): the main logic board (`J22` USB, the SoC, a 3-pin header
-  marked near a button `S2`), a second board under an RF shield (the Wi-Fi/BT combo module — almost certainly the
-  BCM43569A2 confirmed in the unpacked firmware), and a third board (silkscreened `PCB: 30-002335 REV 01`) carrying a
-  **large number of labelled test points** (`TM2`...`TM50`, `TP1`...`TP105`, a jumper `SHRT19`, a button `S2`) — this
-  looks like the manufacturing test/debug board, not where the USB lines are; the `J22` USB connector is the one to
-  use, not these TM/TP pads (which are far more numerous than a simple D+/D−/GND triplet and are more likely factory
-  test contacts for RF/audio bring-up, unrelated to a BootROM download mode).
-- **What's not yet answered**: exactly how to mechanically reach the board with `J22` from outside the assembled
-  speaker. The bottom cap (4 screws, visible in the first internal-photo page) only exposes the speaker driver's
-  ribbon cable, not the main board — the board stack with `J22` sits further up inside the cylindrical housing,
-  meaning a fuller teardown (removing the fabric sleeve and/or the board stack from the shell) is needed, the way any
-  cylindrical Echo/Dot teardown works (Brian Dorey's public Echo Dot/Echo Input teardowns show the general
-  construction style, though not this specific model). This is an ordinary non-destructive disassembly question, not
-  a soldering one.
+**The stack is five boards**, all visible across the 8 photo pages (2026-11-09), which line up with the FCC filing's
+three named schematic exhibits ("Main Logic Board_Schematics", "Combo Board_Schematics", "Mic Board_Schematics") plus
+two sub-assemblies that don't get their own schematic:
+
+| Board (as found in the photos) | What's on it | Connectors |
+|---|---|---|
+| **Main Logic Board** ("JAWFISH" silkscreened on its debug header — apparently this board's own internal name; no public hits for that term otherwise) | the SoC and two more BGA packages, an unshielded Wi-Fi/BT module footprint, antenna pads | `J1100` **"JAWFISH DEBUG"** header, `J1101` **"JTAG 2L"** header, `J22` ribbon to the Mic Board (labelled "MICROPHONE" — a different connector from the USB one below, same designator letter by coincidence of per-board numbering), `J21` ribbon labelled "AMPLIFIER" to the Combo Board, `P2` Wi-Fi/BT antenna pad |
+| **Combo Board** (power + amplifier) | big 820 µF electrolytic caps, an amplifier IC (`U18`), a small pouch cell/supercap beside it on the bench | **a populated micro-USB-B receptacle, silkscreened `J22`** (this board's own numbering — not the Main Logic Board's `J22` ribbon above), an 8-pin connector `J1102` (→ Main Logic Board's `J21`), an 8-pin header `P1` |
+| **Mic Board** (silkscreened `PCB: 30-002335 REV 01`) | a small MCU/codec, mic array routing | a huge array of test points (`TM2`...`TM50`, `TP1`...`TP105`), a jumper `SHRT19`, a button `S2`, ribbon `J21` (→ Main Logic Board's `J22`) |
+| **Volume ring / LED ring board** | a visible rotary encoder (a knurled plastic wheel directly on the board — this model has a physical rotating volume control, not just buttons), LED positions around the rim, a small MCU | ribbon `J11`, header `P1` |
+| Wi-Fi/BT combo module | the actual radio chip, under a can on the Main Logic Board | n/a (soldered down) |
+
+**The micro-USB connector (`J22`, on the Combo Board — the power/amplifier board, not the one with the SoC) is a
+real, soldered-on micro-USB-B receptacle**, not a bare pad: 5 contacts, standard micro-B shell, visible plainly in the
+photos next to the bulk capacitors. This is the same kind of connector rook/crown already have exposed through their
+case — sonar's is just inside the housing rather than behind an external flap. Whether its D+/D− lines actually reach
+the SoC's USB OTG pins (needed for the BootROM download mode the way rook's does) isn't confirmed by a photo alone —
+but a populated micro-USB on a board in this stack, at all, is a much better starting point than bare pads.
+
+**A second, possibly better lead**: the Main Logic Board itself — the one with the SoC — has its own **`J1101`
+"JTAG 2L" header and `J1100` "JAWFISH DEBUG" header**, soldered connectors (not bare pads either, going by the
+silkscreen style matching other populated connectors in the same photo). A populated JTAG header is a direct, well
+understood hardware-debug path independent of USB entirely (a JTAG/SWD probe compatible with this SoC, rather than
+amonet's USB-based BootROM exploit) — worth investigating alongside, or instead of, the USB route, once a unit is
+open enough to see what these headers actually are (header pitch, pin count, whether they're populated with pins or
+just pads).
+
+**What's not yet answered**: exactly how to mechanically reach either board from outside the assembled speaker. The
+bottom cap (4 screws, visible in the first internal-photo page) only exposes the speaker driver's ribbon cable, not
+the Main Logic or Combo boards — those sit further up inside the cylindrical housing, meaning a fuller teardown
+(removing the fabric sleeve and/or the board stack from the shell) is needed, the way any cylindrical Echo/Dot
+teardown works (Brian Dorey's public Echo Dot/Echo Input teardowns show the general construction style, though not
+this specific model, and no Echo Plus 1st gen-specific teardown write-up was found in a search done 2026-11-09). This
+is an ordinary non-destructive disassembly question, not a soldering one.
 
 Open, in order:
 
-1. **Open the case far enough to reach `J22`.** Likely: the 4 screws under the bottom cap release the acoustic
-   driver/base assembly; the main board sits in the stack above it, reachable once that's out of the way. No teardown
-   guide specific to this model is linked here yet — worth a short search (iFixit, Brian Dorey's site, XDA) before
-   improvising, since the general Echo-speaker disassembly pattern is well documented even where this exact model
-   isn't.
+1. **Open the case far enough to reach the Combo Board's `J22` and/or the Main Logic Board's `J1100`/`J1101`.**
+   Likely: the 4 screws under the bottom cap release the acoustic driver/base assembly; the board stack sits above
+   it, reachable once that's out of the way — five boards connected by ribbons and headers (see the table above), so
+   expect to work through more than one connector, not just lift a single board out. No teardown guide specific to
+   this model is linked here yet; the general Echo-speaker disassembly pattern (iFixit, Brian Dorey's site) is well
+   documented even where this exact model isn't, and is the thing worth reading before improvising.
 2. **Confirm the board matches `FIRMWARE_BUILD`** before doing anything irreversible: the FCC internal photos are
    from the original 2017 certification (report dated via `EP693034-02`); a later hardware revision could differ
    (the firmware's own `audio_device.xml` already hints at a second "Sonar V2" speaker revision — see board.c). A
    mismatched board doesn't change the USB connector story but could change which stock libraries/offsets apply.
-2b. If `J22` turns out to be unreachable without real disassembly risk, the FCC schematics exhibits
-   ("Main Logic Board_Schematics", confidential/metadata-only on fccid.io as of 2026-11-09) would have the definitive
-   pinout if they're ever released — check their status before falling back to pad-tracing by continuity.
-3. Once wired: the BROM-entry mechanism itself (hold the right key while plugging in the power adapter, as rook's and
+3. If neither `J22` nor the JTAG/debug headers pan out, the FCC schematics exhibits ("Main Logic Board_Schematics",
+   "Combo Board_Schematics" — confidential/metadata-only on fccid.io as of 2026-11-09) would have the definitive
+   pinout for both if they're ever released; check their status before falling back to pad-tracing by continuity.
+4. Once wired: the BROM-entry mechanism itself (hold the right key while plugging in the power adapter, as rook's and
    donut's docs describe) is expected to be the same MT8163-family behaviour documented for every other model here —
-   that part is not the open question anymore, finding the connector was.
+   that part is not the open question anymore, finding a connector was.
 
 ## What's still open
 
 devices/README.md's porting order, from the top:
 
-1. **Unlock and root** — no known public project; a teardown is needed to reach the main board's `J22` micro-USB
-   connector (confirmed to exist via the FCC internal-photos exhibit, see "USB access" above — likely no soldering
-   needed after all, unlike the earlier donut-style assumption), but the exact disassembly steps to get there aren't
+1. **Unlock and root** — no known public project; a teardown is needed to reach the Combo Board's `J22` micro-USB
+   connector or the Main Logic Board's JTAG/"JAWFISH DEBUG" headers (all confirmed to exist via the FCC internal-photos
+   exhibit, see "USB access" above — likely no soldering needed after all, unlike the earlier donut-style assumption),
+   but the exact disassembly steps to get there aren't
    written down yet; MT8163 BootROM-exploit class expected, unconfirmed on this unit. Not started on real hardware;
    everything below this line is firmware/public-document analysis, none of it run.
 2. ~~Unpack the system partition on the PC~~ — done 2026-11-09 (`firmware/sonar/rootfs`, `rootfs_ramdisk`).
