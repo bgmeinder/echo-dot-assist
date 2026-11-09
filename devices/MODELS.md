@@ -8,7 +8,7 @@ ones with the way into each; [`README.md`](README.md) here says how to add a mod
 | ✅ | Echo Dot 2nd gen | RS03QR | [`biscuit`](biscuit/README.md) | 2016-10-20 | added in [`2f7ff59`](https://github.com/Gamer92000/echo-dot-assist/commit/2f7ff59) |
 | ❌ | Echo Show 1st gen | MW46WB | `knight` | 2017-06-28 | *no known exploit yet* |
 | ✅ | Echo 2nd gen | XC56PY | [`radar`](radar/README.md) | 2017-10-31 | added in [`2f413ba`](https://github.com/Gamer92000/echo-dot-assist/commit/2f413ba) |
-| ❌ | Echo Plus 1st gen | ZE39KL | `sonar` | 2017-10-31 | *no known exploit yet* |
+| 🚧 | Echo Plus 1st gen | ZE39KL | [`sonar`](sonar/README.md) | 2017-10-31 | not started: same MT8163 as rook/crown (platform strings in the pulled `lk`/preloader), Amazon-signed fastboot and `verify` in the stock fstab as rook; no public unlock project found yet, nothing tried on a unit; `device.conf`/`board.c`/`device.mk` are drafts full of `TODO` |
 | 🚧 | Echo Spot 1st gen | VN94DQ | [`rook`](rook/README.md) | 2017-12-19 | unlocked, rooted and installed on one, the satellite runs from boot, adopted by Home Assistant, the speaker plays (the media server restarted at start), the light ring drawn around the rim of the round screen, Bluetooth (the proxy, phone audio with Wi-Fi on 5 GHz), Broadcom's 2025 Wi-Fi driver; guided setup still to do; tracked in [#69](https://github.com/Gamer92000/echo-dot-assist/issues/69) |
 | ✅ | Echo Dot 3rd gen | D9N29T | [`donut`](donut/README.md) | 2018-10-11 | added in [`6d5667b`](https://github.com/Gamer92000/echo-dot-assist/commit/6d5667b) |
 | ❌ | Echo Plus 2nd gen | L9D29R | `lidar` | 2018-10-11 | *no known exploit yet* |
