@@ -118,6 +118,30 @@ amonet's USB-based BootROM exploit) — worth investigating alongside, or instea
 open enough to see what these headers actually are (header pitch, pin count, whether they're populated with pins or
 just pads).
 
+**Cross-checked against [`radar`](../radar/README.md) (Echo 2nd gen), already supported in this repo**: radar's own
+README says plainly "no USB socket", with data lines soldered to pads (`TP13`/`TP14`/`TP15`) on its "amplifier/
+tweeter board" — on the face of it, a contradiction, since sonar's Combo Board looks like the same kind of board
+(power + amplifier) and does have a populated connector. It isn't actually a contradiction once the generations are
+compared: radar is Fire OS 6572 / **Android 7.1.2** (`radar_puffin`, donut-style A/B partitioning) — a full
+generation newer than sonar's Fire OS 5.5.6.9 / **Android 5.1.1** (confirmed from the unpacked firmware, same
+generation as rook, not radar), despite both being announced the same day in 2017 and sharing a similar cylindrical
+shape. Different board design, different manufacturing choices — radar's amp board not getting a populated USB
+connector doesn't say anything about whether sonar's does, and the FCC photos are direct, model-specific evidence
+for sonar that radar's README (accurate for radar) can't override.
+
+**The exploit tool itself may also be more generic than per-device forks**: R0rt1z2 (who did rook's, crown's and
+radar's own unlocks) has a separate project, **`amonet-koboreru`** ([github.com/R0rt1z2/amonet-koboreru](https://github.com/R0rt1z2/amonet-koboreru)),
+describing a more general "insecure Preloader USBDL mode" exploit for "some MediaTek based Amazon devices" (Echo
+Shows named explicitly; Echo Plus/sonar not mentioned, not confirmed supported or tested) — entered, per its own
+README, by "holding Volume Down and Mute (Power) while connecting USB during boot" on Echo devices generally (the
+exact combo is model-specific elsewhere in this repo: rook needs all three buttons, radar needs the action button).
+**Important caveat from that same README**: Amazon patched the underlying Preloader hole around 2022 — a Preloader
+built after that is not vulnerable, so this only works against the original/old firmware, same principle
+devices/README.md already states ("pin the firmware before it ever reaches Amazon").
+
+No Echo Plus 1st gen/`sonar`-specific unlock thread or tool was found in this search (2026-11-09) — only the general
+MT8163 exploit class and tooling that other models here already use.
+
 **What's not yet answered**: exactly how to mechanically reach either board from outside the assembled speaker. The
 bottom cap (4 screws, visible in the first internal-photo page) only exposes the speaker driver's ribbon cable, not
 the Main Logic or Combo boards — those sit further up inside the cylindrical housing, meaning a fuller teardown
