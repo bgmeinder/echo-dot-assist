@@ -101,20 +101,29 @@ Bluetooth radio die), i.e. the shielded radio module — not the power/amplifier
 this section wrongly called "Combo Board".** The power/amp board (the one with the micro-USB) doesn't match any of
 the three named schematics; it's most likely the filing's 4th, generic "Schematics" exhibit. Renamed below.
 
-| Board (as found in the photos) | What's on it | Connectors |
+| Board (as found in the 2017 FCC photos) | What's on it | Connectors |
 |---|---|---|
 | **Main Logic Board** ("JAWFISH" silkscreened on its debug header — apparently this board's own internal name; no public hits for that term otherwise) | the SoC and two more BGA packages, an unshielded Wi-Fi/BT module footprint, antenna pads | `J1100` **"JAWFISH DEBUG"** header, `J1101` **"JTAG 2L"** header, `J22` ribbon to the Mic Board (labelled "MICROPHONE" — a different connector from the USB one below, same designator letter by coincidence of per-board numbering), `J21` ribbon labelled "AMPLIFIER" to the Power Board, `P2` Wi-Fi/BT antenna pad |
 | **Power Board** (renamed from "Combo Board" — power + amplifier, schematic name unconfirmed, likely the filing's generic "Schematics" exhibit) | big 820 µF electrolytic caps, an amplifier IC (`U18`), a small pouch cell/supercap beside it on the bench | **a populated micro-USB-B receptacle, silkscreened `J22`** (this board's own numbering — not the Main Logic Board's `J22` ribbon above), an 8-pin connector `J1102` (→ Main Logic Board's `J21`), an 8-pin header `P1` |
-| **Mic Board** (silkscreened `PCB: 30-002335 REV 01` in the 2017 FCC photos; `PCB 30-002504 REV 01` on a real 2026-11-09 unit — same board, a later PCB revision, confirmed by matching TM/TP layout and connectors) | a TPA3130D2 (TI Class-D stereo amp, confirmed from the real unit's silkscreen) plus mic-element connectors (`ME2`, `ME3`) and mic array routing | a huge array of test points (`TM2`...`TM50`, `TP1`...`TP105`), a jumper `SHRT19`, a button `S2`, ribbon `J21` (→ Main Logic Board's `J22`) |
+| **Mic Board** (silkscreened `PCB: 30-002335 REV 01`) | a small MCU/codec, mic array routing | a huge array of test points (`TM2`...`TM50`, `TP1`...`TP105`), a jumper `SHRT19`, a button `S2`, ribbon `J21` (→ Main Logic Board's `J22`) |
 | **Volume ring / LED ring board** | a visible rotary encoder (a knurled plastic wheel directly on the board — this model has a physical rotating volume control, not just buttons), LED positions around the rim, a small MCU | ribbon `J11`, header `P1` |
 | **Combo Board** (the Wi-Fi/BT combo chip module itself — renamed per the correction above; this is what "Combo Board_Schematics" in the FCC filing almost certainly names) | the actual radio chip, under a can on the Main Logic Board | n/a (soldered down) |
 
-**The micro-USB connector (`J22`, on the Power Board — not the Combo/Wi-Fi-BT board, and not the one with the SoC) is
-a real, soldered-on micro-USB-B receptacle**, not a bare pad: 5 contacts, standard micro-B shell, visible plainly in the
-photos next to the bulk capacitors. This is the same kind of connector rook/crown already have exposed through their
-case — sonar's is just inside the housing rather than behind an external flap. Whether its D+/D− lines actually reach
-the SoC's USB OTG pins (needed for the BootROM download mode the way rook's does) isn't confirmed by a photo alone —
-but a populated micro-USB on a board in this stack, at all, is a much better starting point than bare pads.
+**Revised on a real unit (2026-11-09): the Mic Board and Power Board appear to have been consolidated into one
+double-sided board** on the revision found in an actual Echo Plus (`PCB 30-002504 REV 01`, vs. the 2017 FCC photos'
+separate `30-002335` Mic Board). One face has the TM/TP test array, the TPA3130D2 amp and the `J21` ribbon; the other
+face — confirmed by the person with the unit in hand, directly opposite the ribbon connector's position — has the
+big electrolytic-capacitor cluster, a shield can, and a small connector in roughly `J22`'s expected spot that may be
+the micro-USB. This would mean the two separate 2017-era boards got merged into a single board on this hardware
+revision — itself a real, useful finding (further evidence of the "Sonar V2" redesign `audio_device.xml` already
+hinted at), not just a correction of an earlier misreading of the photos.
+
+**Not yet confirmed: whether that connector is actually a micro-USB-B shell.** The FCC photos' micro-USB was a
+5-contact, metal-shelled connector with a narrow slot opening; a close, well-lit photo of just that connector (ideally
+with something for scale, or literally trying whether a micro-USB cable end physically seats in it) is the next thing
+needed before calling it confirmed — in the single photo seen so far of that face, the clearest candidate was a small
+white 4-pin connector, which reads more like a JST-style wire connector (common for battery/sensor leads) than a USB
+shell, but the framing didn't give a clean, close view of it.
 
 **A second, possibly better lead**: the Main Logic Board itself — the one with the SoC — has its own **`J1101`
 "JTAG 2L" header and `J1100` "JAWFISH DEBUG" header**, soldered connectors (not bare pads either, going by the
@@ -188,29 +197,29 @@ which showed exactly this — the bottom cap's ribbon cable and a small board vi
 was disconnected (ZIF latch) and that first board removed for a look.
 
 **Resolved (2026-11-09, photos of the real board compared against the FCC set): it's the Mic Board**, not an unknown
-board and not the Power Board. The PCB number (`30-002504 REV 01`) is simply a later revision of the FCC photos'
-`30-002335 REV 01` — matching TM/TP layout, matching `J21` ribbon, matching general shape. It confirms a TPA3130D2
-(TI Class-D stereo amp) and mic-element connectors `ME2`/`ME3` that weren't legible in the lower-resolution FCC scan.
-No micro-USB on it, which is expected and correct — the Mic Board was never expected to have one. The Power Board
-with `J22` is further into the stack, behind this one (so on sonar, unlike on the plain Echo 2nd gen, the Mic Board
-comes before the Power Board when working in from the base — see the iFixit-sequence correction above).
+board. The PCB number (`30-002504 REV 01`) is simply a later revision of the FCC photos' `30-002335 REV 01` —
+matching TM/TP layout, matching `J21` ribbon, matching general shape. It confirms a TPA3130D2 (TI Class-D stereo amp)
+and mic-element connectors `ME2`/`ME3` that weren't legible in the lower-resolution FCC scan.
 
-A second board was pulled the same session and, from photos, matches the Power Board's description closely (the same
-electrolytic-capacitor cluster, a shield can, a multi-pin header) — **but the micro-USB connector itself was not
-visible in the photos taken so far**, possibly just out of frame/angle, possibly genuinely absent on this revision
-(the "Sonar V2" question from `audio_device.xml` is still open). Checking the full perimeter of that board for the
-connector is the immediate next step.
+**Correction: the "second board" is the flip side of the same board, not a separate one.** On this revision the Mic
+Board and Power Board appear to have been merged into a single double-sided PCB (see the corrected table entry
+above): the TM/TP/amp face is one side, and directly opposite the `J21` ribbon connector's position on the other
+side sits the capacitor cluster, a shield can, and a small connector in roughly where `J22` should be. Whether that
+connector is actually the micro-USB-B shell isn't confirmed yet — the one photo of that face so far didn't give a
+clean enough view to tell it apart from a small JST-style wire connector sitting nearby. A close, well-lit photo of
+just that one connector (or literally trying whether a micro-USB cable seats in it) is the next thing needed.
 
 Open, in order:
 
-1. **Check the second board's full perimeter for the micro-USB shell.** If it's there: confirmed, move to wiring it
-   up. If it's genuinely absent on this revision: the realistic fallback is the Main Logic Board's `J1100`/`J1101`
-   headers, or pad-tracing the way radar/donut do — don't assume either outcome until the board's been looked at from
-   every angle.
+1. **Get a clear, close-up look at the specific connector opposite `J21`.** Does it have a metal shell with a narrow
+   slot opening and roughly 5 contacts (micro-USB-B), or does it look more like a small plastic-bodied wire connector
+   (JST-style, for a battery or sensor lead)? If it's genuinely not USB: the realistic fallback is the Main Logic
+   Board's `J1100`/`J1101` headers, or pad-tracing the way radar/donut do.
 2. **Confirm the board matches `FIRMWARE_BUILD`** before doing anything irreversible: the FCC internal photos are
-   from the original 2017 certification (report dated via `EP693034-02`); the Mic Board revision mismatch already
-   found (`30-002335` vs `30-002504`) is itself evidence this unit postdates that filing by some amount — keep that
-   in mind for every other board's expected layout too, not just the Power Board's.
+   from the original 2017 certification (report dated via `EP693034-02`); the PCB revision mismatch already found
+   (`30-002335`/two boards vs. `30-002504`/one double-sided board) is itself evidence this unit postdates that
+   filing by some amount, and that the "Sonar V2" redesign `audio_device.xml` hinted at is real — keep that in mind
+   for every other board's expected layout too, not just this one's.
 3. If neither `J22` nor the JTAG/debug headers pan out, the FCC schematics exhibits ("Main Logic Board_Schematics",
    "Combo Board_Schematics" — confidential/metadata-only on fccid.io as of 2026-11-09) would have the definitive
    pinout for both if they're ever released; check their status before falling back to pad-tracing by continuity.
@@ -223,10 +232,11 @@ Open, in order:
 devices/README.md's porting order, from the top:
 
 1. **Unlock and root** — no known public project; in progress on a real unit as of 2026-11-09: base removed (heavily
-   glued, see "USB access" above), Mic Board identified and pulled, a second board matching the Power Board's
-   description (where `J22` should be) also pulled but the micro-USB connector not yet confirmed visible on it —
-   checking its full perimeter is the immediate next step. MT8163 BootROM-exploit class expected, unconfirmed on this
-   unit. Everything below this line is still firmware/public-document analysis, not yet run on the unit.
+   glued, see "USB access" above), and a double-sided board pulled that merges the 2017 filing's separate Mic Board
+   and Power Board into one PCB (`30-002504 REV 01`) — one face has the TM/TP array and amp, the other has the
+   capacitor cluster and a connector in roughly `J22`'s spot, not yet confirmed as micro-USB. Confirming that
+   connector is the immediate next step. MT8163 BootROM-exploit class expected, unconfirmed on this unit. Everything
+   below this line is still firmware/public-document analysis, not yet run on the unit.
 2. ~~Unpack the system partition on the PC~~ — done 2026-11-09 (`firmware/sonar/rootfs`, `rootfs_ramdisk`).
 3. **Fill in `device.conf`/`board.c`/`device.mk` TODOs** — well along from the unpacked firmware alone (PROBE_FILES,
    Wi-Fi/BT chip and patch file, wake word manifest, earcon folder, LED ring, speaker gain control, thermal zone,
