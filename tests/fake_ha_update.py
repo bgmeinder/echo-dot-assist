@@ -121,7 +121,8 @@ async def main():
         await wait_for(lambda: last(UpdateState, upd.key))
         u = last(UpdateState, upd.key)
         check(chan() == "off", "off by default")
-        check(u and re.fullmatch(r"20\d\d\.\d\d\.\d\d\.\d{6}\+\w+(-dirty)?", u.current_version) and u.latest_version == u.current_version and not u.in_progress,
+        # the commit's time and id; built without git (a source archive, a build container's copy): the Makefile's 0+nogit
+        check(u and re.fullmatch(r"20\d\d\.\d\d\.\d\d\.\d{6}\+\w+(-dirty)?|0\+nogit", u.current_version) and u.latest_version == u.current_version and not u.in_progress,
               f"while off: latest = current = {u and u.current_version}, nothing to install")
 
         # anybody on the LAN: must not pick where this Echo's software comes from (a browser not approved), nor install (unkeyed)
