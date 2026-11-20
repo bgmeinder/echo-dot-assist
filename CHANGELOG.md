@@ -1086,6 +1086,29 @@ Found by a review of the plugin code; nothing of it was known to have been used.
   brighter or dimmer than that, "Screen brightness" is the level with adaptive off. "Night mode" (Automatic: a dark
   room; Scheduled: the hours you set; Off) decides when it is night: the faces show their night version and the screen
   dims, or with "Night clock" off it goes dark and lights up only while the Echo shows something.
+- **Echo Spot: back on your network when Android will not.** After a router or access point restart,
+  Android 5.1 could leave the Spot off the network for good: it switches a network off after a few failed logins (an access
+  point that refuses the Echo counts), and it never rejoins by itself a network its connectivity check once
+  marked as without internet. Now, after a minute without a network and then every 5 minutes, Wi-Fi is switched on if
+  it was off and the Spot connects to the network it was last on, through Android's own "connect", what
+  tapping the network in Android's settings does, so Android takes it as chosen again. The Echo Shows are left as they were (device.conf `WIFI_REVIVE`).
+- **Echo Spot: no more networks Android saved by itself.** Android 5.1 saves the other names your access
+  points broadcast (a guest or IoT network) with your network's password, and the Spot then went for those, with the
+  wrong password. While the Spot is on the network you picked every other saved network is forgotten, checked every
+  5 minutes.
+  The guided setup's Wi-Fi step now forgets the networks saved before once the join works, as "Switch network" always
+  did, and on the Spot a forgotten network stays forgotten after a restart (5.1 had only dropped it from memory).
+- **Echo Spot: Android's captive portal test off** (5.1's setting captive_portal_detection_enabled, where the newer
+  Echos have captive_portal_mode, issue #189), so your network is no longer marked as without internet; and **Amazon's
+  Wi-Fi Locker off**, which put the networks saved in your Amazon account back on the Echo, even after a wipe.
+- **Echo Spot: an access point that refuses is skipped while another one has your network.** Fire OS's Wi-Fi always
+  went for the strongest access point, even one that refuses the Spot (a router can lock a device to another access
+  point): it tried one 20 times in 18 seconds. Now a refusal leaves that access point out for at least a minute, every
+  refusal within that minute extends it by another, and while another access point of the same network is in reach the
+  Spot takes that one; when the refusing one is the only one, it is tried again after 1 second, then 2, 4, 8 and so on,
+  up to 5 minutes.
+- **Echo Spot: Wi-Fi on channels 100 to 144.** The driver ran with China's channel list and never saw an access point
+  on those 5 GHz channels; it now uses Amazon's own worldwide setting, as the stock driver did.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

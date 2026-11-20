@@ -125,8 +125,9 @@ for d in sorted(os.listdir(ROOT + "/devices")):
     env = subprocess.run(["sh", "-c", '. "$1" > /dev/null 2>&1; echo "$ANDROID"; echo "$ANDROID_SETTINGS"', "sh", c],
                          capture_output=True, text=True).stdout.split("\n")
     if env[0] == "1":
-        check(f"{d}: global/captive_portal_mode=0 in ANDROID_SETTINGS", "global/captive_portal_mode=0" in env[1].split(),
-              env[1])
+        # Android 6 and later: captive_portal_mode; Android 5.1 (rook) has only captive_portal_detection_enabled
+        off = {"global/captive_portal_mode=0", "global/captive_portal_detection_enabled=0"}
+        check(f"{d}: Android's captive portal test off in ANDROID_SETTINGS", bool(off & set(env[1].split())), env[1])
 
 print("alexa-off settings:", "all ok" if not fails else f"{fails} failed")
 sys.exit(1 if fails else 0)

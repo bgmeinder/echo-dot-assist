@@ -180,7 +180,8 @@ def wifictl(w, args):
         if args[2] == "-": n.pop("psk", None); n["key_mgmt"] = "NONE"
         else: n["psk"] = args[2]; n["key_mgmt"] = "WPA-PSK"
         w["saved"] = json.loads(json.dumps(w["networks"])); return str(n["id"])
-    if verb == "select":
+    if verb == "connect" and w.get("no_connect"): return "FAIL"     # a framework without the messenger call
+    if verb in ("select", "connect"):
         n = next((n for n in w["networks"] if str(n["id"]) == args[1]), None)
         if not n or not may(n): return "FAIL"
         for n in w["networks"]:

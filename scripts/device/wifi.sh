@@ -7,6 +7,10 @@
 #                                that is gone is nobody's either
 #   wifi.sh forget [STATE OUT]   a factory reset (main.sh): every saved network goes, the Echo leaves the one it is on
 #   wifi.sh saved                prints how many networks are saved (netwatch: none = nothing for wifisvc to bring up)
+#   wifi.sh revive               Android models, from netwatch while off the network: Wi-Fi on, the network it was
+#                                last on connected again as a user's tap would (see revive below)
+#   wifi.sh tidy                 Android models, from netwatch while on a network: the other saved networks go (Android
+#                                adds some by itself, see tidy below)
 # Answers go to OUT (/data/local/hassmic/wifi: root's, the daemon only reads): status, scan, result; lock/ while a run
 # works.  wifi.c says what is in them.
 # Two worlds, one script: the Dots' wpa_supplicant and checkers' WifiService (the block at ROUTE below says which
@@ -44,6 +48,14 @@ Q() { if android; then A "$@"; else W "$@"; fi; }
 aok() { [ "$(A "$@" | tail -n 1)" = OK ]; }
 TAB=$(printf '\t')
 aval() { A "$@" | tail -n 1; }
+# a saved network forgotten (forget, tidy, a switch that worked).  Android 7 lets only the network's creator or the
+# system user remove it: a network of Amazon's own setup (the unlock leaves one, crown 2026-10-15: "Not authorized to
+# remove network", the Echo stayed on it) is refused to root, and goes as system
+aforget() {
+    aok remove $1 && return 0
+    [ -z "$WIFICTL_USER" ] && [ -x "${0%/*}/runas" ] &&
+        [ "$("${0%/*}/runas" system system env CLASSPATH=$WIFICTL app_process / Wifictl remove $1 | tail -n 1)" = OK ]
+}
 # how long to wait: for the scan, to get on the new network, for an address and the router behind it, to get back.
 # The last three count looks, one every STEP s: tests (tests/fake_web_wifi.py, whose stand-ins move on per look, not by
 # the clock) look every 0.1 s and give the counts in tenths
@@ -262,7 +274,8 @@ ajoin() {
         sleep $STEP; t=$((t + 1))
     done
     if [ $t -ge $ADDR_SECS ]; then say "on $name, but $([ $why = noaddress ] && echo "no address" || echo "the router at ${gw:-?} did not answer") after $ADDR_SECS s, going back"; aback; return; fi
-    for i in $on; do [ "$i" = "$n" ] || A remove $i > /dev/null; done      # it worked: the ones before go
+    for i in $on; do [ "$i" = "$n" ] || aforget $i; done      # it worked: the ones before go
+    printf '%s\n' "$name" | put chosen       # the network picked here: tidy forgets the others only while on it
     say "switched to $name, address $ip"
     status
     echo "$id ok $ssid $ip 1" | put result
@@ -275,12 +288,9 @@ clean) rm -f $S/wifi-request; alive || rm -rf $O/lock;;
 saved) Q list_networks | grep -c '^[0-9]' ;;
 forget)
     if android; then
-        # WifiService: every configured network goes, saved at once; the link it was on ends with its network
-        # Android 7 lets only the network's creator or the system user remove it: a network of Amazon's own setup (the
-        # unlock leaves one, crown 2026-10-15: "Not authorized to remove network", the Echo stayed on it) is refused to root
+        # WifiService: every configured network goes (aforget), saved at once; the link it was on ends with its network
         for i in $(A list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*/\1/p'); do
-            aok remove $i && continue
-            [ -x "${0%/*}/runas" ] && "${0%/*}/runas" system system env CLASSPATH=$WIFICTL app_process / Wifictl remove $i > /dev/null
+            aforget $i
         done
         [ "$(A list_networks | grep -c '^[0-9]')" = 0 ] && say "every saved network forgotten" || say "!! a saved network could not be removed: the Echo stays on it"
     else
@@ -291,8 +301,63 @@ forget)
         done
         ok save_config && say "every saved network forgotten" || say "!! networks removed, but wpa_supplicant.conf could not be written: a reboot brings them back"
     fi
-    rm -f $O/scan $O/result
+    rm -f $O/scan $O/result $O/chosen
     status;;
+revive)
+    # Off the network (netwatch says when), Android does not always get the Echo back by itself (Echo Spot, Android 5.1,
+    # 2026-11-19).  It switches a saved network off after a few failed logins (WifiConfiguration status DISABLED,
+    # disableReason 3), an access point that refuses the Echo (a router locking it to another one) counting as such;
+    # and it never joins by itself a network it has marked as without internet (numNoInternetAccessReports, from its
+    # connectivity check, which the Echo's firewall fails), only one picked by hand.  The Echo then tried networks
+    # Android added by itself (see tidy) or none, for hours.  So, in order: Wi-Fi switched off is switched on; the
+    # network the Echo was last on (status, written whenever it got an address) is connected as a tap in Android's
+    # settings would (below), which enables it and connects whatever Android thinks of it; failing that, every network Android has
+    # switched off is enabled again.  A network whose password is really wrong just fails again: the next look retries.
+    android || exit 0
+    alive && exit 0                                     # a switch runs: the link is its business
+    if [ "$(settings get global wifi_on 2>/dev/null)" = 0 ]; then
+        A wifi-on > /dev/null; say "Wi-Fi was switched off: switched on"; exit 0
+    fi
+    last=$(sed -n 's/^ssid=//p' $O/status 2>/dev/null)
+    n=
+    [ -n "$last" ] && n=$(A list_networks | while IFS="$TAB" read -r i s rest; do
+        { [ "$s" = "\"$last\"" ] || [ "$s" = "$last" ]; } && { echo "$i"; break; }; done)     # WifiConfiguration quotes it
+    case $n in ''|*[!0-9]*) n=;; esac
+    # connect: as the Settings app's tap (Android records it as the user's choice and saves it); select where the
+    # framework has no such call for root (wifictl connect, Android 5.1 and 6)
+    if [ -n "$n" ] && { aok connect $n || aok select $n; }; then say "off the network: $last (network $n) selected again, connecting"; exit 0; fi
+    on=
+    for i in $(A list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*\[DISABLED\].*/\1/p'); do
+        aok enable $i keep && on="$on $i"
+    done
+    [ -n "$on" ] || exit 0
+    A reassociate > /dev/null
+    say "network$on switched off by Android (failed logins): enabled again, connecting";;
+tidy)
+    # Android 5.1 adds networks by itself: another name broadcast by the access points of a saved network (BSSIDs a
+    # byte apart) is saved with that network's password ("CMD_AUTO_SAVE_NETWORK ... selfAdded", Echo Spot 2026-11-19:
+    # a second network name of the same router beside the one joined, after every boot), and with the wrong password it
+    # held the Echo off.  The Echo keeps only the network it joined (as the settings page's switch leaves it), so while it
+    # is on one (netwatch, when it gets an address and every 5 minutes after), every other saved network goes.  Not while
+    # it is on another network than the one picked on the settings page (chosen): where such a second name takes the
+    # same password, Android may have joined that one, and the network picked must not be the one forgotten.  A chosen
+    # network no longer saved (the Echo joined another since, from the PC's wifi-join.sh or by hand) counts for nothing.
+    android || exit 0
+    alive && exit 0
+    cur=$(A status)
+    [ "$(field "$cur" wpa_state)" = COMPLETED ] || exit 0
+    n=$(field "$cur" id); case $n in ''|*[!0-9]*) exit 0;; esac
+    chosen=$(cat $O/chosen 2>/dev/null)
+    if [ -n "$chosen" ] && [ "$chosen" != "$(field "$cur" ssid | sed 's/^"//;s/"$//')" ]; then
+        A list_networks | while IFS="$TAB" read -r i s rest; do
+            { [ "$s" = "\"$chosen\"" ] || [ "$s" = "$chosen" ]; } && { echo saved; break; }; done | grep -q saved && exit 0
+        rm -f $O/chosen                                 # stale: the network on now is the one to keep
+    fi
+    gone=
+    for i in $(A list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*/\1/p'); do
+        [ "$i" = "$n" ] || { aforget $i && gone="$gone $i"; }
+    done
+    [ -n "$gone" ] && say "on $(field "$cur" ssid | sed 's/^"//;s/"$//'): other saved network$gone forgotten (Android adds them by itself)";;
 take)
     R=$S/wifi-request T=$O/request
     [ -f $R ] && [ ! -L $R ] || exit 0
@@ -314,6 +379,6 @@ take)
         else say "join request not understood, dropped"; fi;;
     *) say "request \"$what\" not understood, dropped";;
     esac;;
-*) echo "usage: wifi.sh take|status|clean|forget [STATE OUT] | saved"; exit 2;;
+*) echo "usage: wifi.sh take|status|clean|forget [STATE OUT] | saved | revive | tidy"; exit 2;;
 esac
 exit 0

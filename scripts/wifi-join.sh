@@ -47,6 +47,18 @@ print(hashlib.pbkdf2_hmac("sha1", p.encode(), s.encode(), 4096, 32).hex())') || 
         sleep 2; t=$((t + 2))
     done
     [ -n "$ip" ] || { echo "no address after $secs s"; W status; exit 1; }
+    # It works: every other saved network goes, as the settings page's switch does (wifi.sh ajoin).  Left behind, Android
+    # falls back to one whenever this network drops: a Spot (rook, 2026-11-07) kept Amazon's setup's 2.4 GHz network,
+    # went to it while the router updated and stayed off the network on its old password.  Android 7 lets only a
+    # network's creator or the system user remove it: then as system, through W (wifi.sh aforget does the same)
+    for i in $(W list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*/\1/p'); do
+        [ "$i" = "$n" ] && continue
+        [ "$(W remove $i | tail -1)" = OK ] && continue
+        [ -z "$WIFICTL_USER" ] && [ "$( (WIFICTL_USER=system; W remove $i) | tail -1)" = OK ] && continue
+        echo "network $i saved before could not be forgotten: the Echo may fall back to it"
+    done
+    # the network the settings page last picked (wifi.sh tidy keeps to it) is not this one any more
+    adb shell "rm -f $D/wifi/chosen"
     W status | grep -E '^(wpa_state|ssid|ip_address)='
     exit 0
 fi
