@@ -138,13 +138,31 @@ class Audio:
         self.calls.append((k, i, flags, pkg)); self.vol[k] = min(i, self.max[k])
 
 
+class Message:                                                 # android.os.Message
+    JAVA = "android.os.Message"
+
+    def __init__(self):
+        self.what, self.arg1 = 0, 0
+
+
+class Messenger:                                               # android.os.Messenger: WifiService's handler behind it
+    JAVA = "android.os.Messenger"
+
+    def __init__(self, w):
+        self.w = w
+
+    def send(self, msg): self.w.calls.append(("message", msg.what, msg.arg1))
+
+
 class Wifi5(Wifi):
     """Android 5.1 (API 22, the Echo Spot): the Android 7 calls, but setWifiEnabled without the caller's name"""
     def setWifiEnabled(self, on): self.enabled = on; self.calls.append(("wifi", on)); return True
+    def saveConfiguration(self): self.calls.append("save"); return True
+    def getWifiServiceMessenger(self): return Messenger(self)
 
 
 class JavaEnv(dexrun.JavaEnv):
-    CLASSES = (Config, Info, Scan, Wifi, Slice, Audio)
+    CLASSES = (Config, Info, Scan, Wifi, Slice, Audio, Message, Messenger)
     NAMES = ("android.os.ServiceManager", "android.os.SystemProperties", "android.net.wifi.IWifiManager$Stub", "android.media.IAudioService$Stub",
              "android.os.IBinder", "android.net.wifi.ScanSettings", "android.os.WorkSource")
 
@@ -190,6 +208,13 @@ def main():
     w5 = Wifi5()
     out, _, _ = run(w5, "wifi-on")
     check(out == ["OK"] and w5.enabled and w5.calls[-1] == ("wifi", True), "api 22: wifi-on is setWifiEnabled(true), no caller's name")
+    w5.addOrUpdateNetwork(Config())
+    out, _, _ = run(w5, "remove", "0")
+    check(out == ["OK"] and not w5.nets and w5.calls[-2:] == [("remove", 0), "save"],
+          "api 22: remove saves the configuration (5.1 keeps a removal in memory only)")
+    out, _, _ = run(w5, "connect", "3")
+    check(out == ["OK"] and w5.calls[-1] == ("message", 0x25001, 3),
+          "api 22: connect sends CONNECT_NETWORK with the id to WifiService's messenger (Settings' tap)")
     psk = "0123456789abcdefABCDEF0123456789abcdef0123456789abcdef0123456789"
     out, _, _ = run(w, "add", "486f6d65", psk)
     check(out == ["0"], "add: prints the new id")

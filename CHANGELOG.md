@@ -2,6 +2,43 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-11-19
+
+- **Echo Show and Spot: back on your network when Android will not.** After a router or access point restart, Android
+  could leave the Echo off your network for good: it switches a network off after a few failed logins (an access point
+  that refuses the Echo counts), and it never rejoins by itself a network its connectivity check marked as without
+  internet, which the Echo's firewall makes every network. Now, after a minute without a network and then every 5
+  minutes, Wi-Fi is switched on if it was off and the Echo connects to the network it was last on again. On the Echo
+  Spot that is Android's own "connect" (what tapping a network in Android's settings does), so Android records your
+  network as chosen and saves it.
+- **Echo Show and Spot: no more networks Android saved by itself.** Android 5.1 saves other names broadcast by your
+  access points (a guest or IoT network) with your network's password, and the Echo then went for those with the wrong
+  password. While the Echo is on its network, every other saved network is forgotten, checked every 5 minutes.
+- **Echo Spot: Android's connectivity check is off** (the global setting captive_portal_detection_enabled), so your
+  network is no longer marked as without internet.
+- **Echo Spot: an access point that refuses is skipped while another one has your network.** The Spot always went for
+  the strongest access point, even one that refuses it (a router can lock a device to another access point). Now a
+  refusal leaves that access point out for at least a minute, and every refusal within that minute extends it another
+  minute; while another access point of the same network is in reach, the Spot takes that one. When the refusing one
+  is the only one, it is tried again after 1 second, then 2, 4, 8 and so on, up to 5 minutes.
+
+## 2026-11-08
+
+- **Echo Show and Spot setup: the Echo keeps only the network it joined.** The guided setup's Wi-Fi step added your
+  network but left the ones saved before (Amazon's own setup's among them), and the Echo fell back to an old one
+  whenever yours dropped, for example while the router updated, and stayed off the network if that one's password had
+  changed. Now the networks saved before are forgotten once the join works, as the settings page's "Switch network"
+  always did. On the Echo Spot a forgotten network also stays forgotten after a restart: Android 5.1 had only dropped
+  it from memory.
+- **Echo Spot: Amazon's Wi-Fi Locker is switched off.** It put the networks saved in your Amazon account back on the
+  Echo whenever the Wi-Fi changed, even after a wipe, so a Spot could go for an old network with an old password.
+- **Echo Spot: Wi-Fi on channels 100 to 144.** The Spot's Wi-Fi driver ran with China's channel list and never saw an
+  access point on those 5 GHz channels; it now uses Amazon's own worldwide setting, as the stock driver did.
+- **Echo Spot: an access point that keeps refusing is skipped for a while.** The Spot always went for the strongest
+  access point of your network, even one that never answered it (a router can lock a device to another access
+  point), and could stay off the network for minutes. Now, after two refused connects in a row, that access point
+  is left out for a minute (longer if it keeps refusing) and the Spot takes the next best one.
+
 ## 2026-11-06
 
 - **Echo Spot: screen brightness and night mode, as stock's settings had them.** "Adaptive brightness" and "Screen

@@ -7,6 +7,10 @@
 #                                that is gone is nobody's either
 #   wifi.sh forget [STATE OUT]   a factory reset (main.sh): every saved network goes, the Echo leaves the one it is on
 #   wifi.sh saved                prints how many networks are saved (netwatch: none = nothing for wifisvc to bring up)
+#   wifi.sh revive               Android models, from netwatch while off the network: Wi-Fi on, the network it was
+#                                last on connected again as a user's tap would (see revive below)
+#   wifi.sh tidy                 Android models, from netwatch while on a network: the other saved networks go (Android
+#                                adds some by itself, see tidy below)
 # Answers go to OUT (/data/local/hassmic/wifi: root's, the daemon only reads): status, scan, result; lock/ while a run
 # works.  wifi.c says what is in them.
 # Two worlds, one script: the Dots' wpa_supplicant and checkers' WifiService (the block at ROUTE below says which
@@ -279,6 +283,52 @@ forget)
     fi
     rm -f $O/scan $O/result
     status;;
+revive)
+    # Off the network (netwatch says when), Android does not always get the Echo back by itself (Echo Spot, Android 5.1,
+    # 2026-11-19).  It switches a saved network off after a few failed logins (WifiConfiguration status DISABLED,
+    # disableReason 3), an access point that refuses the Echo (a router locking it to another one) counting as such;
+    # and it never joins by itself a network it has marked as without internet (numNoInternetAccessReports, from its
+    # connectivity check, which the Echo's firewall fails), only one picked by hand.  The Echo then tried networks
+    # Android added by itself (see tidy) or none, for hours.  So, in order: Wi-Fi switched off is switched on; the
+    # network the Echo was last on (status, written whenever it got an address) is selected, as the settings page's
+    # switch does, which enables it and connects whatever Android thinks of it; failing that, every network Android has
+    # switched off is enabled again.  A network whose password is really wrong just fails again: the next look retries.
+    android || exit 0
+    alive && exit 0                                     # a switch runs: the link is its business
+    if [ "$(settings get global wifi_on 2>/dev/null)" = 0 ]; then
+        A wifi-on > /dev/null; say "Wi-Fi was switched off: switched on"; exit 0
+    fi
+    last=$(sed -n 's/^ssid=//p' $O/status 2>/dev/null)
+    n=
+    [ -n "$last" ] && n=$(A list_networks | while IFS="$TAB" read -r i s rest; do
+        { [ "$s" = "\"$last\"" ] || [ "$s" = "$last" ]; } && { echo "$i"; break; }; done)     # WifiConfiguration quotes it
+    case $n in ''|*[!0-9]*) n=;; esac
+    # connect: as the Settings app's tap (Android records it as the user's choice and saves it); select where the
+    # framework has no such call for root (wifictl connect, Android 5.1 and 6)
+    if [ -n "$n" ] && { aok connect $n || aok select $n; }; then say "off the network: $last (network $n) selected again, connecting"; exit 0; fi
+    on=
+    for i in $(A list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*\[DISABLED\].*/\1/p'); do
+        aok enable $i keep && on="$on $i"
+    done
+    [ -n "$on" ] || exit 0
+    A reassociate > /dev/null
+    say "network$on switched off by Android (failed logins): enabled again, connecting";;
+tidy)
+    # Android 5.1 adds networks by itself: another name broadcast by the access points of a saved network (BSSIDs a
+    # byte apart) is saved with that network's password ("CMD_AUTO_SAVE_NETWORK ... selfAdded", Echo Spot 2026-11-19:
+    # "Skynet Resistance" beside "Skynet Global", after every boot), and with the wrong password it held the Echo off.
+    # The Echo keeps only the network it joined (as the settings page's switch leaves it), so while it is on one (netwatch,
+    # when it gets an address and every 5 minutes after), every other saved network goes.
+    android || exit 0
+    alive && exit 0
+    cur=$(A status)
+    [ "$(field "$cur" wpa_state)" = COMPLETED ] || exit 0
+    n=$(field "$cur" id); case $n in ''|*[!0-9]*) exit 0;; esac
+    gone=
+    for i in $(A list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*/\1/p'); do
+        [ "$i" = "$n" ] || { aok remove $i && gone="$gone $i"; }
+    done
+    [ -n "$gone" ] && say "on $(field "$cur" ssid | sed 's/^"//;s/"$//'): other saved network$gone forgotten (Android adds them by itself)";;
 take)
     R=$S/wifi-request
     [ -f $R ] && [ ! -L $R ] || exit 0
@@ -293,6 +343,6 @@ take)
         else say "join request not understood, dropped"; fi;;
     *) say "request \"$what\" not understood, dropped";;
     esac;;
-*) echo "usage: wifi.sh take|status|clean|forget [STATE OUT] | saved"; exit 2;;
+*) echo "usage: wifi.sh take|status|clean|forget [STATE OUT] | saved | revive | tidy"; exit 2;;
 esac
 exit 0

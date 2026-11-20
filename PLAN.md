@@ -3151,6 +3151,24 @@ Run in this order. Each step says what it proves.
       so HA's Illuminance is not comparable with other sensors.  A scale factor (a board field multiplying what
       core_lux reads, lux_dark then on the true scale) from one reading beside a reference (a phone's light meter on
       the Spot's top, or a sensor in the same room) with the lights on.
+      Wi-Fi after a router update (2026-11-07/08): Master lost the network and went for the old 2.4 GHz "SkynetNodes"
+      with its old password; three causes.  (1) Amazon's Wi-Fi Locker (com.amazon.wifilocker) puts the account's
+      saved networks back into WifiService on a network change, a wipe of /data included: now in ALEXA_PACKAGES.
+      (2) wifi-join.sh never removed the networks saved before (now it does, as wifi.sh's switch), and Android 5.1's
+      removeNetwork is memory only: wifictl remove calls saveConfiguration() on sdk 22/23 (tests/unit/wifictl_run.py).
+      (3) Our bcmdhd defaulted to Ampak's CN/38 for the BCM43569 (dhd_conf_preinit): no channels 100-144, so the
+      access points on 100 and 116 never showed in a scan; Amazon's nvram says ccode=XZ regrev=979 (the firmware's
+      CLM 7.12.6 takes it, read back XZ/979).  Lucas's Spot never had it: Android's global wifi_country_code=US
+      (Amazon's setup) overrides the default; a wiped Spot has none.  The channel-48 access point near the PC never
+      answered either Spot (ten Open System authentications, TIMEOUT; stock's driver the same, ASSOC-REJECT): the
+      router locks each Spot to its own access point.  Fire OS's wpa_supplicant picks the strongest BSS each time
+      ("adptClntPickBss") and stayed on it for minutes; so the driver keeps a refusing-access-point list (wl_cfgscan.c
+      wl_refuser_*): 2 connects in a row failing before the link (auth/assoc; a wrong key fails in the 4-way and
+      counts nothing) leave that BSSID out of scan results and cfg80211's cache for 60 s, doubling to 300 s; a
+      connect that works clears it.  Measured on Lucas's Spot pinned to channel 48: held after the second failure
+      (25 s in), the scan without it; unpinned, on channel 100 in 28 s.  The list lives in the module, so a Wi-Fi
+      off/on (module reload) starts it empty.  Not the cause: CONNECT_INFO_WAR's 80 MHz join chanspec (0xe32a in
+      place of 0xd030; a build without it timed out the same) nor PMF (mfpn the same).
       adb over Wi-Fi (2026-11-06): never listened on rook.  The gate worked (boot.log "adb over Wi-Fi OPEN", the
       property 5555, adbd restarted, 5555 refused rather than dropped from the PC), but the restarted adbd held only
       127.0.0.1:5037; its trace (persist.adb.trace_mask) went from usb_init straight to jdwp, no local_init, and its

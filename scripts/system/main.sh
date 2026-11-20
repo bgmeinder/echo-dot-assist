@@ -411,7 +411,7 @@ psk_only() {
 # Whenever the address changes, wifi.sh writes down which network the Echo is on, for the page: wpa_supplicant can also
 # move to another saved network by itself when the one it is on goes away.
 netwatch() {
-    miss=0 addr= down=0
+    miss=0 addr= down=0 up=0
     while :; do
         rotate_log
         clock_set
@@ -425,7 +425,10 @@ netwatch() {
         # toybox's ifconfig says "inet addr:<a>", Fire OS 5's toolbox (rook) "wlan0: ip <a> mask ..." (0.0.0.0 unconnected)
         if a=$(ifconfig $WLAN 2>/dev/null | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p'); [ -n "$a" ]; then
             miss=0
-            [ "$a" = "$addr" ] || { addr=$a; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; }
+            [ "$a" = "$addr" ] || { addr=$a; up=0; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; }
+            # Android adds networks by itself (wifi.sh tidy): on getting an address, then every 5 minutes, only this one stays
+            [ -n "$ANDROID" ] && [ $((up % 30)) = 0 ] && [ -f $D/wifi.sh ] && sh $D/wifi.sh tidy
+            up=$((up + 1))
             kmod
             [ -n "$WIFI_SERVICE" ] && [ "$(getprop init.svc.$WIFI_SERVICE)" = running ] && [ ! -d $WIFI/lock ] && { sleep 5; stop $WIFI_SERVICE; echo "netwatch: link up, $WIFI_SERVICE stopped"; }
         elif [ -d $WIFI/lock ]; then
@@ -436,6 +439,9 @@ netwatch() {
             # (checkers has no WIFI_SERVICE of its own: Android's WifiService brings its networks up)
             [ $miss -ge 6 ] && [ -n "$WIFI_SERVICE" ] && [ "$(getprop init.svc.$WIFI_SERVICE)" != running ] && [ "$(sh $D/wifi.sh saved 2>/dev/null)" != 0 ] &&
                 { start $WIFI_SERVICE; echo "netwatch: no address for 60 s, $WIFI_SERVICE started"; miss=0; }
+            # Android does not always rejoin by itself (wifi.sh revive: Wi-Fi off, networks it switched off or marked as
+            # without internet): after 60 s without an address, then every 5 minutes, it is put back on its network
+            [ -n "$ANDROID" ] && [ $((miss % 30)) = 6 ] && [ -f $D/wifi.sh ] && sh $D/wifi.sh revive
         fi
         psk_only
         sleep 10

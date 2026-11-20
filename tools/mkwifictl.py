@@ -26,7 +26,15 @@ WorkSource)V.  Output is shaped like wpa_cli's, so scripts/device/wifi.sh can se
                                     (64 hex digits, as wifi.c derives it), - = open
     enable <id> <only|keep>         enableNetwork(id, disableOthers)
     select <id>                     enableNetwork(id, true) and reconnect()
-    remove <id>                     removeNetwork(id)
+    connect <id>                    WifiManager.connect(id) as the Settings app's tap does: CONNECT_NETWORK to
+                                    WifiService's messenger (getWifiServiceMessenger), which also records the
+                                    network as the user's choice over the others in range and saves it, so
+                                    Android's own auto-join prefers it after a reboot (enableNetwork does not
+                                    persist that); Android 5.1 and 6 (rook, 2026-11-19).  OK once handed over:
+                                    the join itself is asynchronous, as select's
+    remove <id>                     removeNetwork(id); on Android 5.1 and 6 also saveConfiguration(): there
+                                    removeNetwork only drops it in memory, and a reboot brings it back
+                                    (rook, 2026-11-08)
     reassociate                     reconnect()
     wifi-on                         setWifiEnabled(null, true)
     name <hex>                      the decoded text, for the shell's messages
@@ -51,6 +59,7 @@ The Java source it stands for:
             else if (v.equals("add")) add(w, a);
             else if (v.equals("enable")) enable(w, a);
             else if (v.equals("select")) select(w, a);
+            else if (v.equals("connect")) connect(w, a);
             else if (v.equals("remove")) remove(w, a);
             else if (v.equals("reassociate")) reassociate(w);
             else if (v.equals("wifi-on")) wifion(w);
@@ -167,8 +176,18 @@ The Java source it stands for:
             os(w, "reconnect");
             p(Boolean.TRUE.equals(r) ? "OK" : "FAIL");
         }
+        static void connect(Object w, String[] a) {
+            Object m = os(w, "getWifiServiceMessenger");
+            Object msg = Class.forName("android.os.Message").newInstance();
+            fset(msg, "what", Integer.valueOf(151553));                   // WifiManager.CONNECT_NETWORK
+            fset(msg, "arg1", Integer.valueOf(Integer.parseInt(a[1])));
+            w1(m, "send", "android.os.Message", msg);
+            p("OK");
+        }
         static void remove(Object w, String[] a) {
             Object r = w1(w, "removeNetwork", "int", Integer.valueOf(Integer.parseInt(a[1])));
+            String sdk = (String) sinv("android.os.SystemProperties", "get", "java.lang.String", "ro.build.version.sdk");
+            if (sdk.equals("22") || sdk.equals("23")) os(w, "saveConfiguration");   // else gone until a reboot only
             p(Boolean.TRUE.equals(r) ? "OK" : "FAIL");
         }
         static void reassociate(Object w) { os(w, "reconnect"); p("OK"); }
@@ -200,7 +219,7 @@ python3 tools/mkwifictl.py --check    only re-read and check the one in the tree
 
 The assembler, writer, reader and checks are tools/dexasm.py's (shared with tools/mkringbar.py).  What the
 writer guarantees (ART's DexFileVerifier on the Echo is strict): id tables sorted as the format wants (strings
-by content, the rest by their indices), one class LWifictl; with 30 static methods and no fields, no debug info,
+by content, the rest by their indices), one class LWifictl; with 31 static methods and no fields, no debug info,
 no tries.  read() parses the result back, checks checksum and signature, walks the map, decodes every
 instruction and runs a type-flow check over every method (verify(): what ART's method verifier would refuse of
 this subset), before the file is written out.  --framework resolves every class, method and field the dex
@@ -217,6 +236,7 @@ from dexasm import (Code, Program, AGET_OBJ, APUT_OBJ, APUT_BYTE, VIRT, DIRECT, 
 import dexasm                                                  # noqa: E402
 
 KEY_WPA_PSK = 1                              # WifiConfiguration.KeyMgmt.WPA_PSK (--framework checks it)
+CONNECT_NETWORK = 0x25001                    # WifiManager.CONNECT_NETWORK, Protocol.BASE_WIFI_MANAGER + 1 (likewise)
 ME = "LWifictl;"
 STR9 = "Ljava/lang/String;"
 
@@ -250,6 +270,7 @@ SELF = [
     ("add",   (OBJ, STRARR), "V"),
     ("enable", (OBJ, STRARR), "V"),
     ("select", (OBJ, STRARR), "V"),
+    ("connect", (OBJ, STRARR), "V"),
     ("remove", (OBJ, STRARR), "V"),
     ("reassociate", (OBJ,), "V"),
     ("wifion", (OBJ,), "V"),
@@ -286,7 +307,7 @@ def emit():
         c.aget_at(3, 0, 0)                                    # v = a[0]
         for verb, name in [("status", "status"), ("list_networks", "list"), ("scan_results", "scanres"),
                            ("keys", "keys"), ("scan", "startscan"), ("add", "add"), ("enable", "enable"),
-                           ("select", "select"), ("remove", "remove"), ("reassociate", "reassociate"),
+                           ("select", "select"), ("connect", "connect"), ("remove", "remove"), ("reassociate", "reassociate"),
                            ("wifi-on", "wifion"), ("name", "name")]:
             c.const_string(1, verb)
             c.invoke(VIRT, "str.eq", [3, 1]); c.move_result(1)
@@ -778,14 +799,47 @@ def emit():
         okfail(c, 4, 5)
         m.append(("select", c))
 
+    def connect():
+        # w=0 a=1 msgr=2 msg=3 t=4 t2=5 box=6
+        c = Code(7, 2)
+        c.const_string(4, "getWifiServiceMessenger"); c.invoke(STATIC, "os", [0, 4]); c.move_result(2, True)
+        c.const_string(3, "android.os.Message")
+        c.invoke(STATIC, "cls.forName", [3]); c.move_result(3, True)
+        c.invoke(VIRT, "cls.newi", [3]); c.move_result(3, True)
+        c.const(6, CONNECT_NETWORK); c.invoke(STATIC, "int.value", [6]); c.move_result(6, True)
+        c.const_string(4, "what"); c.invoke(STATIC, "fset", [3, 4, 6])
+        c.aget_at(6, 1, 1)
+        c.invoke(STATIC, "int.parse", [6]); c.move_result(6)
+        c.invoke(STATIC, "int.value", [6]); c.move_result(6, True)
+        c.const_string(4, "arg1"); c.invoke(STATIC, "fset", [3, 4, 6])
+        c.const_string(4, "send"); c.const_string(5, "android.os.Message")
+        c.invoke(STATIC, "w1", [2, 4, 5, 3])
+        c.const_string(4, "OK"); c.invoke(STATIC, "p", [4])
+        c.ret_void()
+        m.append(("connect", c))
+
     def remove():
-        # w=0 a=1 box=2 r=3 t=4
-        c = Code(5, 2)
+        # w=0 a=1 box/sdk=2 r=3 t=4, sinv's arguments 2,4,5,6
+        c = Code(7, 2)
         c.aget_at(2, 1, 1)
         c.invoke(STATIC, "int.parse", [2]); c.move_result(2)
         c.invoke(STATIC, "int.value", [2]); c.move_result(2, True)
         c.const_string(3, "removeNetwork"); c.const_string(4, "int")
         c.invoke(STATIC, "w1", [0, 3, 4, 2]); c.move_result(3, True)
+        # Android 5.1 and 6 (rook): removeNetwork leaves wpa_supplicant.conf as it was; saveConfiguration() writes it
+        c.const_string(2, "android.os.SystemProperties"); c.const_string(4, "get")
+        c.const_string(5, "java.lang.String"); c.const_string(6, "ro.build.version.sdk")
+        c.invoke(STATIC, "sinv", [2, 4, 5, 6]); c.move_result(2, True)
+        c.check_cast(2, STR)
+        c.const_string(4, "22"); c.invoke(VIRT, "str.eq", [2, 4]); c.move_result(4)
+        c.ifz(IFEQZ, 4, "not22")
+        c.goto_("old")
+        c.label("not22")
+        c.const_string(4, "23"); c.invoke(VIRT, "str.eq", [2, 4]); c.move_result(4)
+        c.ifz(IFEQZ, 4, "done")
+        c.label("old")
+        c.const_string(4, "saveConfiguration"); c.invoke(STATIC, "os", [0, 4])
+        c.label("done")
         okfail(c, 3, 4)
         m.append(("remove", c))
 
@@ -866,7 +920,7 @@ def emit():
         m.append(("wifion", c))
 
     for f in (main, wifi, pkg, lst, cls, inv, sinv, w1, w2, iz, os, fget, fset, cat, p, ps, ip, unhex, hex2s,
-              status, list, keys, scanres, startscan, add, enable, select, remove, reassociate, wifion, name, volmax):
+              status, list, keys, scanres, startscan, add, enable, select, connect, remove, reassociate, wifion, name, volmax):
         f()
     p(err=True)
     return m
@@ -899,6 +953,10 @@ REFLECTED = [
     ("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", ["Ljava/lang/String;", "Z"], False),
     # Android 5.1 and 6 (rook, API 22): no caller's name yet
     ("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", ["Z"], False),
+    ("Landroid/net/wifi/IWifiManager;", "saveConfiguration", [], False),
+    ("Landroid/net/wifi/IWifiManager;", "getWifiServiceMessenger", [], False),
+    ("Landroid/os/Messenger;", "send", ["Landroid/os/Message;"], False),
+    ("Landroid/os/Message;", "<init>", [], False),                 # Class.newInstance
     ("Landroid/media/IAudioService$Stub;", "asInterface", ["Landroid/os/IBinder;"], True),
     ("Landroid/media/IAudioService;", "getStreamMaxVolume", ["I"], False),
     ("Landroid/media/IAudioService;", "setStreamVolume", ["I", "I", "I", "Ljava/lang/String;"], False),
@@ -921,8 +979,11 @@ REFLECTED_FIELDS = [
     ("Landroid/net/wifi/ScanResult;", "frequency", "I"),
     ("Landroid/net/wifi/ScanResult;", "level", "I"),
     ("Landroid/net/wifi/ScanResult;", "capabilities", "Ljava/lang/String;"),
+    ("Landroid/os/Message;", "what", "I"),
+    ("Landroid/os/Message;", "arg1", "I"),
 ]
-CONSTANTS = [("Landroid/net/wifi/WifiConfiguration$KeyMgmt;", "WPA_PSK", KEY_WPA_PSK)]
+CONSTANTS = [("Landroid/net/wifi/WifiConfiguration$KeyMgmt;", "WPA_PSK", KEY_WPA_PSK),
+             ("Landroid/net/wifi/WifiManager;", "CONNECT_NETWORK", CONNECT_NETWORK)]
 
 # which firmware has which signature: Android 9 is the one with the RTT classes (API 28)
 API9 = "Landroid/net/wifi/rtt/RangingRequest;"
@@ -940,6 +1001,8 @@ for _m, _p in (("getConnectionInfo", (STR9,)), ("startScan", (STR9,)),
 API7 = "Ljava/util/stream/Stream;"
 ONLY_IF[("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", ("Z",))] = "!" + API7
 ONLY_IF[("Landroid/net/wifi/IWifiManager;", "setWifiEnabled", (STR9, "Z"))] = API7
+ONLY_IF[("Landroid/net/wifi/IWifiManager;", "saveConfiguration", ())] = "!" + API7
+ONLY_IF[("Landroid/net/wifi/IWifiManager;", "getWifiServiceMessenger", ())] = "!" + API7   # Android 8 adds the caller's name
 
 PROG = Program(ME, SELF, reflected=REFLECTED, reflected_fields=REFLECTED_FIELDS, constants=CONSTANTS, only_if=ONLY_IF)
 

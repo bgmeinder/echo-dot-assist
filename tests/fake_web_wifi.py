@@ -289,6 +289,75 @@ def main(android=False):
             check(p.returncode == 1 and "WPA3" not in p.stdout and "password is probably wrong" in p.stdout, f"mixed, the wrong password: as before ({p.stdout.strip()!r})")
             p = join("Elsewhere", "whatever!")
             check(p.returncode == 1 and "WPA3" not in p.stdout and "no network named" in p.stdout, f"a name not on the air: as before ({p.stdout.strip()!r})")
+
+        # ---- wifi.sh revive and tidy (Android: back on its network when WifiService will not, and only that one kept;
+        # Echo Spot 2026-11-19)
+        main_sh = open(f"{ROOT}/scripts/system/main.sh").read()
+        nw = re.search(r"^netwatch\(\) \{.*?^\}$", main_sh, re.M | re.S).group(0)
+        check(re.search(r'\[ -n "\$ANDROID" \] && \[ \$\(\(miss % 30\)\) = 6 \] .*wifi\.sh revive', nw),
+              "netwatch: revive on Android models after 60 s without an address, then every 5 minutes")
+        check(re.search(r'\[ -n "\$ANDROID" \] && \[ \$\(\(up % 30\)\) = 0 \] .*wifi\.sh tidy', nw) and "addr=$a; up=0;" in nw,
+              "netwatch: tidy on Android models on getting an address, then every 5 minutes")
+        def wset(**kw):
+            w = W(); w.update(kw)
+            with open(world, "w") as f: json.dump(w, f)
+        run = lambda what, env=renv: subprocess.run(["sh", f"{dev}/wifi.sh", what, state, out], env=env,
+                                                    capture_output=True, text=True, timeout=30).stdout
+        revive = lambda env=renv: run("revive", env)
+        statusf = os.path.join(out, "status")
+        def last_on(ssid):
+            if ssid is None:
+                if os.path.exists(statusf): os.remove(statusf)
+            else:
+                with open(statusf, "w") as f: f.write(f"wpa_state=COMPLETED\nid=0\nssid={ssid}\n")
+        off = dict(home, disabled=1); other = dict(attic, disabled=0)
+        wset(networks=[off, other], current=None, target=None, calls=[])
+        if android:
+            last_on("HomeNet")
+            o = revive()
+            calls = [c for c in W()["calls"] if c.startswith("app_process")]
+            check("HomeNet (network 0) selected again" in o and any(c.endswith("connect 0") for c in calls)
+                  and not any(c.endswith("select 0") for c in calls),
+                  f"off the network: the one it was last on connected as a user's tap, whatever Android thinks of it ({o.strip()!r})")
+            wset(networks=[dict(off), dict(other)], current=None, target=None, calls=[], no_connect=True)
+            o = revive()
+            calls = [c for c in W()["calls"] if c.startswith("app_process")]
+            check("selected again" in o and any(c.endswith("select 0") for c in calls),
+                  f"no connect call in the framework: selected instead ({o.strip()!r})")
+            wset(no_connect=False)
+            wset(networks=[dict(off), dict(other)], current=None, target=None, calls=[])
+            last_on("Elsewhere")
+            o = revive()
+            check("network 0 switched off by Android" in o and not any(c.endswith(" select 0") for c in W()["calls"]),
+                  f"the network it was last on no longer saved: the switched-off ones enabled instead ({o.strip()!r})")
+            wset(networks=[dict(off), dict(other)], current=None, target=None, calls=[])
+            last_on(None)
+            o = revive()
+            n = {x["id"]: x["disabled"] for x in W()["networks"]}
+            check("network 0 switched off by Android" in o and n == {0: 0, 1: 0}, f"a switched-off network: enabled again ({o.strip()!r})")
+            calls = [c for c in W()["calls"] if c.startswith("app_process")]
+            check(any(c.endswith("enable 0 keep") for c in calls) and not any(" enable 1 " in c for c in calls)
+                  and any(c.endswith("reassociate") for c in calls), f"only that one, the others kept, then connects ({calls})")
+            wset(calls=[])
+            check(revive() == "" and not any(c.startswith("app_process enable") for c in W()["calls"]), "nothing switched off: nothing done")
+            wset(networks=[dict(off), dict(other)], calls=[])
+            os.makedirs(os.path.join(out, "lock"))
+            open(os.path.join(out, "lock", "pid"), "w").write(f"{os.getpid()}\n")
+            open(os.path.join(out, "lock", "boot"), "w").write(open("/proc/sys/kernel/random/boot_id").read())
+            check(revive() == "" and W()["networks"][0]["disabled"] == 1, "while a switch runs: left alone")
+            check(run("tidy") == "" and len(W()["networks"]) == 2, "tidy while a switch runs: left alone")
+            shutil.rmtree(os.path.join(out, "lock"))
+            # tidy: on network 0, a network Android added by itself beside it goes
+            wset(networks=[dict(home, disabled=0), dict(attic, disabled=0)], current=0, target=None, calls=[])
+            o = run("tidy")
+            check([x["id"] for x in W()["networks"]] == [0] and "network 1 forgotten" in o and W()["saved"] == W()["networks"],
+                  f"tidy on a network: the others forgotten, and saved so ({o.strip()!r})")
+            check(run("tidy") == "", "tidy with nothing else saved: nothing said")
+            wset(networks=[dict(home, disabled=1), dict(attic, disabled=1)], current=None, target=None, calls=[])
+            check(run("tidy") == "" and len(W()["networks"]) == 2, "tidy off the network: nothing forgotten")
+        else:
+            check(revive() == "" and W()["networks"][0]["disabled"] == 1, "the Dots (wpa_supplicant): not theirs, left alone")
+            check(run("tidy") == "" and len(W()["networks"]) == 2, "tidy on the Dots: not theirs, left alone")
     finally:
         proc.send_signal(signal.SIGTERM); proc.wait()
     if check.failed:
