@@ -1083,6 +1083,7 @@ static void *band_thread(void *arg)
     int fd = -1, w = 0, have_rows = -1, sent = 0, timeout = 0, fails = 0, waited = 0, off_ui = 0;
     float last_k = -1;                              /* the brightness of the frame sent last */
     long long last_wake = 0, next_check = 0;
+    woke_at = now_ms();                             /* the timeout counts from the start, not from boot's 0 */
     for (;;) {
         pthread_mutex_lock(&lock);
         int want = rows, wake = wake_req; wake_req = 0;
