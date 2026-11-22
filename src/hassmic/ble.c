@@ -1128,8 +1128,13 @@ static void event(const unsigned char *p, size_t n)            /* p: event code,
     switch (p[0]) {
     case EV_CMD_COMPLETE:
         if (n >= 4) { cc_op = u16(q + 1); cc_status = q[3]; memcpy(cc_ret, q + 4, n - 4 < sizeof cc_ret ? n - 4 : sizeof cc_ret); }
+        /* Broadcom's Set_ACL_Priority (a2dp.c set_streaming): whether the controller took it */
+        if (n >= 4 && cc_op == 0xfc57) fprintf(stderr, "bluetooth: ACL priority: status 0x%02x\n", cc_status);
         break;
-    case EV_CMD_STATUS: if (n >= 4) { cc_op = u16(q + 2); cc_status = q[0]; } break;
+    case EV_CMD_STATUS:
+        if (n >= 4) { cc_op = u16(q + 2); cc_status = q[0]; }
+        if (n >= 4 && cc_op == 0xfc57) fprintf(stderr, "bluetooth: ACL priority: command status 0x%02x\n", cc_status);
+        break;
     case EV_DISCONNECT:
         if (n >= 4 && !q[0] && (c = by_handle(u16(q + 1) & 0x0fff))) {
             int err = c->state == C_CLOSING ? 0 : q[3]; uint64_t a = c->addr;

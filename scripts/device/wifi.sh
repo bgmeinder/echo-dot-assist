@@ -174,7 +174,8 @@ join() {
     echo "$id switching $ssid" | put result
     cur=$(W status)
     old= ; [ "$(field "$cur" wpa_state)" = COMPLETED ] && old=$(field "$cur" id)
-    renewed= PROPS=; [ -n "$(getprop dhcp.$WLAN.result)" ] && command -v dhcpcd > /dev/null && PROPS=1
+    # dhcpcd first: without it (the Spot under plain Linux, devices/rook/linux) there is no getprop either
+    renewed= PROPS=; command -v dhcpcd > /dev/null && [ -n "$(getprop dhcp.$WLAN.result)" ] && PROPS=1
     # what is enabled now: enabled again on the way back (select_network disables the rest)
     on= ids=$(W list_networks | sed -n 's/^\([0-9][0-9]*\)[[:space:]].*/\1/p')
     for i in $ids; do case "$(val get_network $i disabled)" in 1|2) ;; *) on="$on $i";; esac; done

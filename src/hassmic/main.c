@@ -2964,6 +2964,24 @@ int core_transcript(const char *text)
         }
     }
     int hit = said(w, stops, sizeof stops / sizeof *stops);
+    /* Amazon's "stop" keyword just heard: its run's transcript is that "stop", but speech to text may put a word before
+     * it ("Alexa, stop" -> "Let's stop.": a Spot, 2026-11-22, the wake word not sent, the stream from its aligned end, 50
+     * ms before Pryon's guess at the "stop"; the music paused by the keyword and Home Assistant answered the rest).  Two
+     * words at most, the last a stop: that "stop".  "<wake word>, stop the timer" ends in another word and still goes on */
+    if (!hit && stop_ms && stop_ms >= heard_ms && mono_ms() - stop_ms < 10000) {
+        const char *e = text + strlen(text), *b;
+        while (e > text && strchr(" \t.,!?\"'", e[-1])) e--;
+        for (b = e; b > text && !strchr(" \t,", b[-1]); b--) ;
+        int words = 0;
+        for (const char *p = text; p < e; p++) if (!strchr(" \t,", *p) && (p == text || strchr(" \t,", p[-1]))) words++;
+        char last[64], lw[64];
+        size_t ln = (size_t)(e - b) < sizeof last ? (size_t)(e - b) : sizeof last - 1;
+        memcpy(last, b, ln); last[ln] = 0;
+        fold(last, lw, sizeof lw);
+        if (words <= 2 && said(lw, stops, sizeof stops / sizeof *stops)) {
+            hit = 1; fprintf(stderr, "said stop: \"%s\" taken for the keyword's \"stop\"\n", text);
+        }
+    }
     if (atomic_load(&alarm_on)) {
         if (!hit && !(timer_stop_any && w[0])) return 0;
         core_alarm_stop(hit ? "said stop" : "a request during the ring");

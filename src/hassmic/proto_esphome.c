@@ -570,9 +570,17 @@ static void send_token_state(int c)     /* lock held */
  * one (netaddr.c), so the state at subscribe stays true. */
 static void send_web_state(void)        /* lock held */
 {
-    PB(b, 64); struct sockaddr_in a; socklen_t n = sizeof a; char s[INET_ADDRSTRLEN], url[48];
-    if (!core_web_port) return;
-    if (getsockname(reply_fd, (struct sockaddr *)&a, &n) || a.sin_family != AF_INET || !inet_ntop(AF_INET, &a.sin_addr, s, sizeof s)) return;
+    /* over IPv4 or IPv6 (the listeners are dual-stack, netio.h): an IPv4 link's own address shows as ::ffff:a.b.c.d,
+     * written as IPv4; an IPv6 one in brackets.  A link-local one names no interface a browser could use: none sent */
+    PB(b, 96); struct sockaddr_storage a; socklen_t n = sizeof a; char s[INET6_ADDRSTRLEN + 2], url[80];
+    if (!core_web_port || getsockname(reply_fd, (struct sockaddr *)&a, &n)) return;
+    if (a.ss_family == AF_INET) { if (!inet_ntop(AF_INET, &((struct sockaddr_in *)&a)->sin_addr, s, sizeof s)) return; }
+    else if (a.ss_family == AF_INET6) {
+        const struct in6_addr *v6 = &((struct sockaddr_in6 *)&a)->sin6_addr;
+        if (IN6_IS_ADDR_V4MAPPED(v6)) { if (!inet_ntop(AF_INET, v6->s6_addr + 12, s, sizeof s)) return; }
+        else if (IN6_IS_ADDR_LINKLOCAL(v6)) return;
+        else { s[0] = '['; if (!inet_ntop(AF_INET6, v6, s + 1, sizeof s - 2)) return; strcat(s, "]"); }
+    } else return;
     snprintf(url, sizeof url, "http://%s:%d", s, core_web_port);
     pb_fixed32(&b, 1, KEY_WEB_URL); pb_str(&b, 2, url);
     send_msg(TEXT_SENSOR_STATE, &b);

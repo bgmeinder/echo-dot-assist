@@ -29,9 +29,11 @@
  *    doubling up to 30 min.  Each peer has its own schedule: Home Assistant and Music Assistant restarting together
  *    cost two avahi restarts, which no link notices.
  *
- * Addresses: every IPv4 address the interfaces have (getifaddrs), up or not: a link over an interface that is down for a
- * moment is not stale, and dhcpcd -K leaves the address in place anyway.  HASSMIC_FAKE_ADDRS (tests) names a file with
- * one address per line instead, loopback not set apart.  HASSMIC_ANNOUNCE_TIMES="<first> <max>" (s; first for every
+ * Addresses: every IPv4 and IPv6 address the interfaces have (getifaddrs), up or not: a link over an interface that is
+ * down for a moment is not stale, and dhcpcd -K leaves the address in place anyway.  Kept as IPv6, IPv4 ones as
+ * ::ffff:a.b.c.d, which is how the listeners' dual-stack sockets (netio.h net_listen) see an IPv4 link's own address;
+ * a link over IPv6 is checked the same way (2026-11-22: the listeners took IPv4 only before).  HASSMIC_FAKE_ADDRS
+ * (tests) names a file with one address per line instead, either family, loopback not set apart.  HASSMIC_ANNOUNCE_TIMES="<first> <max>" (s; first for every
  * peer). */
 #define _GNU_SOURCE
 #include "netaddr.h"
@@ -49,7 +51,7 @@
 #include <unistd.h>
 
 #define POLL_S      2
-#define MAX_ADDRS   64          /* an Echo has two or three; a PC with containers and VPNs had 17 */
+#define MAX_ADDRS   64          /* an Echo has two or three; a PC with containers and VPNs had 17; IPv6 brings several per interface */
 #define MAX_LINKS   16          /* ESPHome takes 4 clients; the rest are refused at once */
 #define MAX_PEERS   4
 static int FIRST_S;             /* HASSMIC_ANNOUNCE_TIMES: instead of each peer's own first_s */
@@ -67,9 +69,19 @@ void netaddr_link(int fd, int on)
     pthread_mutex_unlock(&mu);
 }
 
-struct addrs { int n, own; uint32_t a[MAX_ADDRS]; };     /* own: how many of a[] are not loopback (those come first) */
+struct addrs { int n, own; struct in6_addr a[MAX_ADDRS]; };  /* own: how many of a[] are not loopback (those come first) */
 
-static int cmp(const void *x, const void *y) { uint32_t a = *(const uint32_t *)x, b = *(const uint32_t *)y; return a < b ? -1 : a > b; }
+static int cmp(const void *x, const void *y) { return memcmp(x, y, sizeof(struct in6_addr)); }
+
+/* an address as IPv6: IPv4 as ::ffff:a.b.c.d.  0: neither family */
+static int to6(const struct sockaddr *sa, struct in6_addr *out)
+{
+    if (sa->sa_family == AF_INET6) { *out = ((const struct sockaddr_in6 *)sa)->sin6_addr; return 1; }
+    if (sa->sa_family != AF_INET) return 0;
+    memset(out, 0, sizeof *out); out->s6_addr[10] = out->s6_addr[11] = 0xff;
+    memcpy(out->s6_addr + 12, &((const struct sockaddr_in *)sa)->sin_addr, 4);
+    return 1;
+}
 
 /* 0, or -1 when it cannot tell (then nothing is decided on it) */
 static int addrs_get(struct addrs *s)
@@ -77,17 +89,20 @@ static int addrs_get(struct addrs *s)
     const char *fake = getenv("HASSMIC_FAKE_ADDRS");
     s->n = s->own = 0;
     if (fake) {
-        FILE *f = fopen(fake, "r"); char l[64]; struct in_addr ia;
+        FILE *f = fopen(fake, "r"); char l[64]; struct sockaddr_in v4 = { .sin_family = AF_INET };
         if (!f) return 0;
-        while (s->n < MAX_ADDRS && fgets(l, sizeof l, f)) { l[strcspn(l, " \r\n")] = 0; if (inet_pton(AF_INET, l, &ia) == 1) s->a[s->n++] = ia.s_addr; }
+        while (s->n < MAX_ADDRS && fgets(l, sizeof l, f)) {
+            l[strcspn(l, " \r\n")] = 0;
+            if (inet_pton(AF_INET, l, &v4.sin_addr) == 1) to6((struct sockaddr *)&v4, &s->a[s->n++]);
+            else if (inet_pton(AF_INET6, l, &s->a[s->n]) == 1) s->n++;
+        }
         fclose(f);
         s->own = s->n;
     } else {
-        struct ifaddrs *ifs, *i; uint32_t lo[MAX_ADDRS]; int nlo = 0, over = 0;
+        struct ifaddrs *ifs, *i; struct in6_addr lo[MAX_ADDRS], a; int nlo = 0, over = 0;
         if (getifaddrs(&ifs)) return -1;
         for (i = ifs; i; i = i->ifa_next) {
-            if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET) continue;
-            uint32_t a = ((struct sockaddr_in *)i->ifa_addr)->sin_addr.s_addr;
+            if (!i->ifa_addr || !to6(i->ifa_addr, &a)) continue;
             if (i->ifa_flags & IFF_LOOPBACK) { if (nlo < MAX_ADDRS) lo[nlo++] = a; else over = 1; }
             else if (s->own < MAX_ADDRS) s->a[s->own++] = a;
             else over = 1;
@@ -103,15 +118,20 @@ static int addrs_get(struct addrs *s)
     return 0;
 }
 
-static int has(const struct addrs *s, uint32_t a) { for (int i = 0; i < s->n; i++) if (s->a[i] == a) return 1; return 0; }
+static int has(const struct addrs *s, const struct in6_addr *a) { for (int i = 0; i < s->n; i++) if (!memcmp(&s->a[i], a, sizeof *a)) return 1; return 0; }
+
+/* IPv4 as itself, IPv6 as IPv6 */
+static void addr_text(const struct in6_addr *a, char *out, socklen_t cap)
+{
+    if (IN6_IS_ADDR_V4MAPPED(a)) inet_ntop(AF_INET, a->s6_addr + 12, out, cap); else inet_ntop(AF_INET6, a, out, cap);
+}
 
 static void addrs_text(const struct addrs *s, char *out, size_t cap)
 {
     size_t k = 0; out[0] = 0;
-    for (int i = 0; i < s->own && k + INET_ADDRSTRLEN + 1 < cap; i++) {
-        struct in_addr ia = { s->a[i] };
+    for (int i = 0; i < s->own && k + INET6_ADDRSTRLEN + 1 < cap; i++) {
         if (i) out[k++] = ' ';
-        inet_ntop(AF_INET, &ia, out + k, (socklen_t)(cap - k)); k += strlen(out + k);
+        addr_text(&s->a[i], out + k, (socklen_t)(cap - k)); k += strlen(out + k);
     }
     if (!s->own) snprintf(out, cap, "none");
 }
@@ -123,9 +143,9 @@ static int drop_stale(const struct addrs *s)
     int n = 0;
     pthread_mutex_lock(&mu);
     for (int i = 0; i < nlinks; i++) {
-        struct sockaddr_in me; socklen_t l = sizeof me;
-        if (getsockname(links[i], (struct sockaddr *)&me, &l) || me.sin_family != AF_INET || has(s, me.sin_addr.s_addr)) continue;
-        char t[INET_ADDRSTRLEN]; inet_ntop(AF_INET, &me.sin_addr, t, sizeof t);
+        struct sockaddr_storage me; socklen_t l = sizeof me; struct in6_addr a;
+        if (getsockname(links[i], (struct sockaddr *)&me, &l) || !to6((struct sockaddr *)&me, &a) || has(s, &a)) continue;
+        char t[INET6_ADDRSTRLEN]; addr_text(&a, t, sizeof t);
         fprintf(stderr, "network: closing a link over %s, which this Echo no longer has\n", t);
         shutdown(links[i], SHUT_RDWR); n++;
     }
@@ -140,7 +160,7 @@ static time_t mono(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t)
 static void *watch(void *arg)
 {
     (void)arg;
-    struct addrs last = { 0 }, cur; char was[160], now_t[160], why[64];
+    struct addrs last = { 0 }, cur; char was[MAX_ADDRS * (INET6_ADDRSTRLEN + 1)], now_t[sizeof was], why[64];
     struct { time_t since, next; int wait; } p[MAX_PEERS] = { { 0 } };
     int np = hooks->npeers < MAX_PEERS ? hooks->npeers : MAX_PEERS;
     for (;; sleep(POLL_S)) {

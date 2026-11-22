@@ -386,9 +386,10 @@ async def stop_music(env, state, quiet=False):
         check("ControllerPauseEvent" in ctl and not va.stopped, f'"<wake word>, stop" pauses the music, its pipeline goes on: {ctl}, stops {va.stopped}')
         await pause()
         cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_RUN_START, None); cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_STT_START, None)
-        cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_STT_END, {"text": "Stop."})
+        # the wake word replayed and misheard before the "stop" (a Spot, 2026-11-22: "Let's stop."): still that stop
+        cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_STT_END, {"text": "Let's stop."})
         await until(lambda: va.stopped and "said stop: music paused, run cancelled" in log())
-        check(bool(va.stopped) and "said stop: music paused, run cancelled" in log(), f'the transcript "Stop." after it is cancelled, not answered: stops {va.stopped}')
+        check(bool(va.stopped) and "said stop: music paused, run cancelled" in log(), f'the transcript "Let\'s stop." after it is cancelled, not answered: stops {va.stopped}')
         cli.send_voice_assistant_event(Ev.VOICE_ASSISTANT_RUN_END, None); await sync(cli)
 
         n = len(ctl); proc.send_signal(signal.SIGUSR2)               # the action button
