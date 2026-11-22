@@ -103,9 +103,9 @@ static int parse_answer(const uint8_t *m, size_t len, const char *name, struct i
 }
 
 /* Sent from a port other than 5353, so responders answer by unicast to it (RFC 6762 5.1, 6.7) and the responder that
- * owns 5353 on the Echo (mdnsd) is not in the way.  IPv6 only: an AAAA question to ff02::fb on every interface that
+ * owns 5353 on the Echo (mdnsd) is not in the way.  IPv6 first: an AAAA question to ff02::fb on every interface that
  * can carry it (multicast has no route to follow); of the answers, a ULA before a global address before a link-local
- * one, which keeps the interface it was heard on. */
+ * one, which keeps the interface it was heard on.  No interface with IPv6: none asked, -1 at once. */
 int mdns_resolve6(const char *host, struct sockaddr_in6 *out)
 {
     char name[256]; uint8_t q[300], r[1500]; int got = 0;
@@ -147,6 +147,7 @@ int mdns_resolve6(const char *host, struct sockaddr_in6 *out)
             }
             freeifaddrs(ifs);
         }
+        if (!nd) break;                                 /* no interface with IPv6: nobody to ask (IPv4 next, at once) */
         struct pollfd pfd = { .fd = s, .events = POLLIN };
         while (!got && poll(&pfd, 1, wait_ms[round]) > 0) {
             struct sockaddr_in6 from; socklen_t fl = sizeof from;
@@ -163,10 +164,75 @@ int mdns_resolve6(const char *host, struct sockaddr_in6 *out)
     return got ? 0 : -1;
 }
 
+static unsigned parse_a(const uint8_t *m, size_t len, const char *name)
+{
+    char rn[256]; size_t off = 12;
+    if (len < 12 || !(m[2] & 0x80)) return 0;                                  /* responses only */
+    unsigned qd = m[4] << 8 | m[5], rr = (m[6] << 8 | m[7]) + (m[8] << 8 | m[9]) + (m[10] << 8 | m[11]);
+    for (unsigned i = 0; i < qd; i++) { if (get_name(m, len, &off, rn, sizeof rn)) return 0; off += 4; }
+    for (unsigned i = 0; i < rr; i++) {
+        if (get_name(m, len, &off, rn, sizeof rn) || off + 10 > len) return 0;
+        unsigned type = m[off] << 8 | m[off + 1], cls = (m[off + 2] << 8 | m[off + 3]) & 0x7fff, rdlen = m[off + 8] << 8 | m[off + 9];
+        off += 10;
+        if (off + rdlen > len) return 0;
+        if (type == 1 && cls == 1 && rdlen == 4 && !strcasecmp(rn, name)) { unsigned a; memcpy(&a, m + off, 4); return a; }
+        off += rdlen;
+    }
+    return 0;
+}
+
+/* The same over IPv4 (an A question to 224.0.0.251 on every IPv4 interface), for a name with no IPv6 address */
+unsigned mdns_resolve4(const char *host)
+{
+    char name[256]; uint8_t q[300], r[1500]; unsigned addr = 0;
+    snprintf(name, sizeof name, "%s", host);
+    size_t nl = strlen(name); if (nl && name[nl - 1] == '.') name[nl - 1] = 0;
+    memset(q, 0, 12); q[1] = 0x42;                                              /* id; flags 0: standard query */
+    q[5] = 1;                                                                   /* one question */
+    int l = put_name(q + 12, sizeof q - 16, name);
+    if (l < 0) return 0;
+    size_t qlen = 12 + l;
+    q[qlen++] = 0; q[qlen++] = 1;                                               /* type A */
+    q[qlen++] = 0x80; q[qlen++] = 1;                                            /* class IN, unicast response wanted */
+    int s = socket(AF_INET, SOCK_DGRAM, 0), bound = 0;
+    if (s < 0) return 0;
+    struct sockaddr_in me = { .sin_family = AF_INET };
+    for (int i = 0; i < 20 && !bound; i++) {
+        me.sin_port = htons(16384 + ((unsigned)getpid() * 7919u + i * 104729u) % 16384);
+        bound = !bind(s, (struct sockaddr *)&me, sizeof me);
+    }
+    if (!bound) { close(s); return 0; }
+    unsigned char ttl = 255; setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+    struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons(5353) };
+    inet_pton(AF_INET, "224.0.0.251", &to.sin_addr);
+    static const int wait_ms[] = { 250, 500, 1000 };
+    for (int round = 0; round < 3 && !addr; round++) {
+        struct ifaddrs *ifs = NULL; int sent = 0;
+        if (!getifaddrs(&ifs)) {
+            for (struct ifaddrs *i = ifs; i; i = i->ifa_next) {
+                if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || (i->ifa_flags & IFF_LOOPBACK) ||
+                    !(i->ifa_flags & IFF_UP) || !(i->ifa_flags & IFF_MULTICAST)) continue;
+                struct in_addr via = ((struct sockaddr_in *)i->ifa_addr)->sin_addr;
+                setsockopt(s, IPPROTO_IP, IP_MULTICAST_IF, &via, sizeof via);
+                if (sendto(s, q, qlen, 0, (struct sockaddr *)&to, sizeof to) == (ssize_t)qlen) sent++;
+            }
+            freeifaddrs(ifs);
+        }
+        if (!sent) sendto(s, q, qlen, 0, (struct sockaddr *)&to, sizeof to);
+        struct pollfd pfd = { .fd = s, .events = POLLIN };
+        while (!addr && poll(&pfd, 1, wait_ms[round]) > 0) {
+            ssize_t n = recv(s, r, sizeof r, 0);
+            if (n > 0) addr = parse_a(r, n, name);
+        }
+    }
+    close(s);
+    return addr;
+}
+
 /* ---------------------------------------------------------------- TCP */
 
-/* A socket owned by the real group, if runas -r gave us one: the egress lock lets that group reach any address, while
- * the effective group stays what the mixer wants.  The filesystem group is per thread and switched back at once. */
+/* A socket owned by the real group where it differs from the effective one (a firewall that lets one group out); the
+ * filesystem group is per thread and switched back at once.  hassmic as root, as on Linux: a plain socket */
 int net_socket(int family, int type, int protocol)
 {
     gid_t r, e, s; int fd;
@@ -179,12 +245,19 @@ int net_socket(int family, int type, int protocol)
 
 int net_connect(const char *host, const char *port, int timeout_s)
 {
-    struct addrinfo hints = { 0 }, *ai = NULL, local = { 0 }, *list = NULL; struct sockaddr_in6 sin;
+    struct addrinfo hints = { 0 }, *ai = NULL, local = { 0 }, *list = NULL; struct sockaddr_in6 sin; struct sockaddr_in sin4 = { 0 };
     size_t hl = strlen(host);
-    if (hl > 6 && !strcasecmp(host + hl - 6, ".local") && !mdns_resolve6(host, &sin)) {
-        sin.sin6_port = htons(atoi(port));
-        local.ai_family = AF_INET6; local.ai_addr = (struct sockaddr *)&sin; local.ai_addrlen = sizeof sin;
-        list = &local;
+    if (hl > 6 && !strcasecmp(host + hl - 6, ".local")) {     /* IPv6 first; IPv4 where the name has no IPv6 address */
+        unsigned a4;
+        if (!mdns_resolve6(host, &sin)) {
+            sin.sin6_port = htons(atoi(port));
+            local.ai_family = AF_INET6; local.ai_addr = (struct sockaddr *)&sin; local.ai_addrlen = sizeof sin;
+            list = &local;
+        } else if ((a4 = mdns_resolve4(host))) {
+            sin4.sin_family = AF_INET; sin4.sin_port = htons(atoi(port)); sin4.sin_addr.s_addr = a4;
+            local.ai_family = AF_INET; local.ai_addr = (struct sockaddr *)&sin4; local.ai_addrlen = sizeof sin4;
+            list = &local;
+        }
     }
     hints.ai_socktype = SOCK_STREAM;
     if (!list) {                                        /* also for ".local" that nobody answered: some DNS servers serve it */

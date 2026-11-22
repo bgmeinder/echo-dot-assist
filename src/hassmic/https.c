@@ -255,10 +255,12 @@ static struct curl_slist *resolve_local(const char *url)
     size_t hl = (size_t)((colon ? colon : end) - p);
     if (hl < 7 || hl >= sizeof host || strncasecmp(p + hl - 6, ".local", 6)) return NULL;
     memcpy(host, p, hl); host[hl] = 0;
-    struct sockaddr_in6 a;
-    if (mdns_resolve6(host, &a) || IN6_IS_ADDR_LINKLOCAL(&a.sin6_addr)                 /* (curl's list takes no scope) */
-        || !inet_ntop(AF_INET6, &a.sin6_addr, ip, sizeof ip)) return NULL;          /* curl tries DNS: some servers serve .local */
-    snprintf(entry, sizeof entry, "%s:%.*s:[%s]", host, colon ? (int)(end - colon - 1) : 3, colon ? colon + 1 : "443", ip);
+    struct sockaddr_in6 a; unsigned a4; char br[INET6_ADDRSTRLEN + 2];
+    if (!mdns_resolve6(host, &a) && !IN6_IS_ADDR_LINKLOCAL(&a.sin6_addr)                /* (curl's list takes no scope) */
+        && inet_ntop(AF_INET6, &a.sin6_addr, ip, sizeof ip)) snprintf(br, sizeof br, "[%s]", ip);     /* IPv6 first */
+    else if ((a4 = mdns_resolve4(host)) && inet_ntop(AF_INET, &a4, ip, sizeof ip)) snprintf(br, sizeof br, "%s", ip);
+    else return NULL;                                   /* curl tries DNS: some servers serve .local */
+    snprintf(entry, sizeof entry, "%s:%.*s:%s", host, colon ? (int)(end - colon - 1) : 3, colon ? colon + 1 : "443", br);
     return curl->slist_append(NULL, entry);
 }
 

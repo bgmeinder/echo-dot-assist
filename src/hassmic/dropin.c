@@ -73,7 +73,7 @@ static struct {
     int invited;                                        /* the first invite went out (once the core knew: tell_core) */
     uint8_t id[8], peer[8];
     char node[64];
-    struct in6_addr ip; uint16_t port;                  /* the other Echo's audio address (its ULA: arb.c), port in network order */
+    struct in6_addr ip; uint16_t port;                  /* the other Echo's audio address (its best: arb.c), port in network order */
     uint8_t esk[32], epk[32], key[32];
     long long since, sig_at, rx_at, live_at;
     int media;                                          /* call.c's generation while connected, -1 before */
@@ -538,10 +538,11 @@ int dropin_start(int port)
     late_idle = getenv("HASSMIC_DROPIN_LATE_IDLE");
     arb_self(self_id);
     if ((sock = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0)) < 0) { perror("drop in: socket"); return -1; }
-    setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof on);
+    on = 0; setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof on);     /* an IPv4-only peer too, as ::ffff: */
     memset(&a, 0, sizeof a); a.sin6_family = AF_INET6; a.sin6_port = htons((uint16_t)port); a.sin6_addr = in6addr_any;
     if (bind(sock, (struct sockaddr *)&a, sizeof a)) { perror("drop in: bind"); close(sock); sock = -1; return -1; }
     setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof tos);
+    setsockopt(sock, IPPROTO_IP, IP_TOS, &tos, sizeof tos);                       /* (the same for IPv4's packets) */
     my_port = (uint16_t)port;
     running = 1;
     if (pthread_create(&t, NULL, loop, NULL)) { running = 0; return -1; }

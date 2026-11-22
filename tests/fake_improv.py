@@ -543,21 +543,22 @@ def taken():
 def main():
     tmp = tempfile.mkdtemp(); state, out, fake = (os.path.join(tmp, d) for d in ("state", "wifi", "bin"))
     for d in (state, out, fake): os.makedirs(d)
-    for t in ("wpa_cli", "ifconfig", "getprop", "setprop", "dhcpcd", "ping", "stop", "start"):
+    for t in ("wpa_cli", "ip", "ping"):
         os.symlink(f"{ROOT}/tests/fake_wifi_tools.py", os.path.join(fake, t))
-    world, arp, online = os.path.join(tmp, "world.json"), os.path.join(tmp, "arp"), os.path.join(tmp, "online")
+    world, arp, online, route = (os.path.join(tmp, n) for n in ("world.json", "arp", "online", "route"))
     air = [
-        {"hex": H("HomeNet"), "psk": PSK("right password", "HomeNet"), "flags": "[WPA2-PSK-CCMP][ESS]", "bss": [["aa:00:00:00:00:01", 2437, -60]], "ip": "192.168.1.20", "gw": "192.168.1.1"},
+        {"hex": H("HomeNet"), "psk": PSK("right password", "HomeNet"), "flags": "[WPA2-PSK-CCMP][ESS]", "bss": [["aa:00:00:00:00:01", 2437, -60]], "ip": "192.168.1.20", "gw": "192.168.1.1",
+         "ip6": "fd00:1::20", "gw6": "fe80::1"},
         {"hex": H("Cafe"), "psk": None, "flags": "[ESS]", "bss": [["aa:00:00:00:00:04", 2462, -80]], "ip": "172.16.0.9", "gw": "172.16.0.1"},
         {"hex": H("Only3"), "psk": PSK("whatever!", "Only3"), "flags": "[RSN-SAE-CCMP][ESS]", "bss": [["aa:00:00:00:00:05", 5200, -50]], "ip": "10.9.9.9", "gw": "10.9.9.1"},
         {"hex": "", "psk": None, "flags": "[ESS]", "bss": [["aa:00:00:00:00:06", 2412, -40]], "ip": "10.8.8.8", "gw": "10.8.8.1"},
     ]
-    with open(world, "w") as f:        # a new Echo, or one after a reset: no network saved, on none, no dhcpcd started yet
-        json.dump({"networks": [], "next_id": 0, "current": None, "target": None, "air": air, "arp_file": arp, "saved": [],
-                   "lease": {"ip": "", "gw": ""}, "props": {"result": "", "reason": ""}, "svc": {}}, f)
+    with open(world, "w") as f:        # a new Echo, or one after a reset: no network saved, on none
+        json.dump({"networks": [], "next_id": 0, "current": None, "target": None, "air": air, "arp_file": arp, "route_file": route,
+                   "saved": []}, f)
     open(arp, "w").write("IP address       HW type     Flags       HW address            Mask     Device\n")
     W = lambda: json.load(open(world))
-    renv = dict(os.environ, PATH=f"{fake}:{os.environ['PATH']}", FAKE_WIFI_WORLD=world, WIFI_ARP=arp,
+    renv = dict(os.environ, PATH=f"{fake}:{os.environ['PATH']}", FAKE_WIFI_WORLD=world, WIFI_ARP=arp, WIFI_ROUTE=route,
                 WIFI_SCAN_SECS="0", WIFI_STEP="0.1", WIFI_JOIN_SECS="6", WIFI_ADDR_SECS="5", WIFI_BACK_SECS="6")     # looks: the stand-ins answer at the third
     stop_root, rootlog = threading.Event(), []
     def root():                        # main.sh's watcher: hands each request to wifi.sh; online once it says ok
@@ -574,7 +575,7 @@ def main():
     ctl = Controller(); keys = os.path.join(tmp, "keys"); os.mkfifo(keys)
     log = os.path.join(tmp, "log")
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_WIFI=out, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw",
-               HASSMIC_PLAY=os.path.join(tmp, "play.raw"), HASSMIC_MDNS_FILE=os.path.join(tmp, "none"), HASSMIC_ARB_ADDR="ff02::114",
+               HASSMIC_PLAY=os.path.join(tmp, "play.raw"), HASSMIC_MDNS_FILE=os.path.join(tmp, "none"), HASSMIC_ARB_ADDR="ff02::114", HASSMIC_ARB_ADDR4="127.255.255.255",
                HASSMIC_MODELS=os.path.join(tmp, "models"), HASSMIC_ADB_OPEN=os.path.join(tmp, "adb-open"), HASSMIC_LOG=log,
                HASSMIC_BT_DEV=ctl.path, HASSMIC_FAKE_ONLINE=online, HASSMIC_IMPROV_TIMES="1 1 4 3 3 18 2",       # (not set up, lost, the button's, provisioned; on a network 3 s: let go; not authorized and nothing from it for 18 s: let go; identify without the button once in 2 s)
                HASSMIC_LOGIN_MS="60000:300",                # (a login asked for right after a press here: web.c's quiet time 0.3 s)
@@ -672,7 +673,8 @@ def main():
         check(phone.until(hd["state"], bytes([prot.State.PROVISIONING])), "again: provisioning")
         check(phone.until(hd["state"], bytes([prot.State.PROVISIONED]), 30), "on the network: provisioned")
         v = phone.note(hd["result"]); res = prot.parse_result(v) if v else None
-        check(isinstance(res, prot.WiFiSettingsRes) and res.redirect_url == f"http://192.168.1.20:{WEB}/".encode(), f"the settings page's address back: {res}")
+        check(isinstance(res, prot.WiFiSettingsRes) and res.redirect_url == f"http://[fd00:1::20]:{WEB}/".encode(),
+              f"the settings page's address back: IPv6's (a ULA) first, in brackets: {res}")
         sv = W()["saved"]
         check(len(sv) == 1 and sv[0]["ssid"] == H("HomeNet") and sv[0]["psk"] == PSK("right password", "HomeNet"), "saved: HomeNet with the PSK")
         check("right password" not in open(world).read() and "right password" not in logtext(), "the password itself is nowhere")
@@ -693,10 +695,8 @@ def main():
         asyncio.run(ha(adopt))
         check(wait(lambda: os.path.exists(os.path.join(state, "adopted")), 3) and "setup done" in logtext(), "voice assistant subscribed: adopted")
 
-        # ---- set up, network gone: advertising wants the button.  Rebooted meanwhile: init's dhcpcd (-K) started with no
-        # carrier, which "dhcpcd -n" would wait for for good (cannoli, 2026-11-15)
+        # ---- set up, network gone: advertising wants the button
         os.unlink(online)
-        w = W(); w["carrier"] = False; json.dump(w, open(world, "w"))
         check(wait(lambda: ctl.adv["on"], 8), "set up, no network for a while: advertising")
         check(prot.ImprovServiceData.from_bytes(ctl.adv_fields()[0x16][2:]).state == prot.State.AUTHORIZATION_REQUIRED, "authorization required")
         # a browser's login armed before any phone is connected (here over loopback; on an Echo, the network just back),

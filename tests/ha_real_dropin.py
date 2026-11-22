@@ -126,7 +126,7 @@ class Echo:
     def start(self):
         s = self.state
         env = dict(os.environ, HASSMIC_STATE=s, HASSMIC_PLAY=f"{s}/play.raw", HASSMIC_VOIP=f"{s}/voip.raw",
-                   HASSMIC_MDNS_FILE=f"{s}/none", HASSMIC_ARB_ADDR="ff02::114", HASSMIC_TEST_SCORE="500",
+                   HASSMIC_MDNS_FILE=f"{s}/none", HASSMIC_ARB_ADDR="ff02::114", HASSMIC_ARB_ADDR4="127.255.255.255", HASSMIC_TEST_SCORE="500",
                    HASSMIC_MODELS=f"{s}/models")
         # its own mount namespace: /sys/class/net/wlan0/address is this Echo's MAC address
         cmd = (f"mount --bind {s}/net /sys/class/net && exec {self.binary} -P esphome -p {self.port} -n '{self.name}' -L "

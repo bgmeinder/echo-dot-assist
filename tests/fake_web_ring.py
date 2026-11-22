@@ -82,7 +82,7 @@ async def main():
     env = dict(os.environ, HASSMIC_LED_ROOT=etc, HASSMIC_FAKE_LED=leds, HASSMIC_FAKE_BEAM=beam, HASSMIC_STATE=state,
                HASSMIC_LEDS_RESULT=result, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(tmp, "play.raw"),
                HASSMIC_MDNS_FILE=os.path.join(tmp, "mdns"), HASSMIC_FAKE_ADDRS=os.path.join(tmp, "addrs"),
-               HASSMIC_ARB_ADDR="ff02::114", HASSMIC_MODELS=os.path.join(tmp, "models"), HASSMIC_LOG=log)
+               HASSMIC_ARB_ADDR="ff02::114", HASSMIC_ARB_ADDR4="127.255.255.255", HASSMIC_MODELS=os.path.join(tmp, "models"), HASSMIC_LOG=log)
     with open(env["HASSMIC_FAKE_ADDRS"], "w") as f: f.write("127.0.0.1\n")
     with open(os.path.join(state, "adopted"), "w") as f: f.write("ha\n")
     with open(beam, "w") as f: f.write("3\n")

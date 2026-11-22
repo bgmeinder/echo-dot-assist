@@ -7,7 +7,7 @@ by "<wake word>, stop", by "auflegen", from Home Assistant, from the settings pa
 off, an Echo outside the network, a name nobody has); an Echo in an empty room, whose noise must stay there; and an
 Echo that vanishes mid-call.  For each call the kitchen
 makes: every state on the way ("calling" before a refusal that comes at once) and the "Drop In result" event.
-Everything goes out on loopback (HASSMIC_ARB_ADDR): nothing of it reaches the LAN."""
+Everything goes out on the test's own network namespace (HASSMIC_ARB_ADDR, HASSMIC_ARB_ADDR4): nothing of it reaches the LAN."""
 import asyncio, base64, os, re, signal, struct, subprocess, sys, tempfile, time, wave
 import numpy as np
 from aioesphomeapi import APIClient, VoiceAssistantEventType as Ev
@@ -56,7 +56,7 @@ class Echo:
         if net:                                         # a member already: the network's id and key
             with open(os.path.join(self.state, "arbitration"), "w") as f: f.write(f"arbitrate 1\nctr 0\nnet {net}\n")
         self.env = dict(os.environ, HASSMIC_STATE=self.state, HASSMIC_PLAY=os.path.join(self.state, "play.raw"), HASSMIC_VOIP=self.voip,
-                        HASSMIC_MDNS_FILE=os.path.join(self.state, "none"), HASSMIC_ARB_ADDR=BCAST, HASSMIC_TEST_SCORE="500",
+                        HASSMIC_MDNS_FILE=os.path.join(self.state, "none"), HASSMIC_ARB_ADDR=BCAST, HASSMIC_ARB_ADDR4="127.255.255.255", HASSMIC_TEST_SCORE="500",
                         HASSMIC_MODELS=os.path.join(self.state, "models"), HASSMIC_EARCONS=EARCONS + "/",
                         HASSMIC_DROPIN_TIMES="3000 4000")       # no answer after 3 s, lost after 4 s without audio (4 and 5): near
                                                                 # the Echo's, so a stall of the PC under load does not end a call

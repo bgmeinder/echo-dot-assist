@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""A ".local" name over IPv6 (net.c mdns_resolve6): Home Assistant's media server reached by its mDNS name on a network
-without IPv4.  This test answers mDNS on ff02::fb (port 5353, the namespace's t0 under tests/run.py) for ha-test.local
-with the network's ULA, serves the media on IPv6 only, and has Home Assistant play http://ha-test.local:<port>/a.wav.
-Checked: the Echo asked an AAAA question (not A), the media came over IPv6 from the Echo's ULA, and the Echo played it."""
+"""".local" names, IPv6 first (net.c mdns_resolve6, then mdns_resolve4): Home Assistant's media server reached by its
+mDNS name.  This test answers mDNS itself: on ff02::fb (the namespace's t0 under tests/run.py) with the network's ULA,
+and on 224.0.0.251 (loopback) with 127.0.0.1.  ha-test.local has both addresses, ha-v4.local only an IPv4 one; the
+media server takes both families.  Checked: for a name with both, the AAAA question comes first and the media is
+fetched over IPv6 from the Echo's ULA, never IPv4; for a name with IPv4 alone, the A question after the AAAA one, the
+media fetched over IPv4; and the Echo plays both."""
 import asyncio, os, socket, struct, sys, threading, time
 from http.server import ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -10,7 +12,7 @@ from esphome_common import Handler, check, until, sync, home_assistant, run
 
 PORTS = (16993, 16994, 16995, 16996, 16997)
 MEDIA = 16998
-NAME = "ha-test.local"
+BOTH, V4 = "ha-test.local", "ha-v4.local"
 
 
 def iface():
@@ -36,30 +38,49 @@ def qname(m, off):
     return ".".join(parts), off + 1
 
 
-asked = []                                  # (qtype, unicast bit) of each question for NAME
-def responder(stop):
+asked = []                                  # (name, qtype, unicast bit, family) of each question
+def answer(s, m, src, family, records):
+    """one question; records: {(name, qtype): rdata}.  Answered by unicast, as asked"""
+    if len(m) < 12 or m[2] & 0x80: return
+    name, off = qname(m, 12)
+    qtype, qclass = struct.unpack(">HH", m[off:off + 4])
+    if name.lower() not in (BOTH, V4): return
+    asked.append((name.lower(), qtype, qclass >> 15, family))
+    rd = records.get((name.lower(), qtype))
+    if rd is None: return
+    ans = m[12:off] + struct.pack(">HHIH", qtype, 1, 120, len(rd)) + rd
+    s.sendto(m[:2] + b"\x84\x00" + struct.pack(">HHHH", 1, 1, 0, 0) + m[12:off + 4] + ans, src)
+
+
+def responder6(stop):
     s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("::", 5353))
+    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1); s.bind(("::", 5353))
     s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, socket.inet_pton(socket.AF_INET6, "ff02::fb") + struct.pack("@I", socket.if_nametoindex(iface())))
     s.settimeout(0.2)
-    me = socket.inet_pton(socket.AF_INET6, ula())
+    rec = {(BOTH, 28): socket.inet_pton(socket.AF_INET6, ula())}
     while not stop.is_set():
         try: m, src = s.recvfrom(1500)
         except socket.timeout: continue
-        if len(m) < 12 or m[2] & 0x80: continue
-        name, off = qname(m, 12)
-        qtype, qclass = struct.unpack(">HH", m[off:off + 4])
-        if name.lower() != NAME: continue
-        asked.append((qtype, qclass >> 15))
-        if qtype != 28: continue
-        q = m[12:off + 4]
-        name_wire = m[12:off]
-        ans = name_wire + struct.pack(">HHIH", 28, 1, 120, 16) + me
-        s.sendto(m[:2] + b"\x84\x00" + struct.pack(">HHHH", 1, 1, 0, 0) + q + ans, src)     # unicast, as asked
+        answer(s, m, src, 6, rec)
 
 
-class V6(ThreadingHTTPServer):
+def responder4(stop):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("", 5353))
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton("224.0.0.251") + socket.inet_aton("127.0.0.1"))
+    s.settimeout(0.2)
+    lo = socket.inet_aton("127.0.0.1")
+    rec = {(BOTH, 1): lo, (V4, 1): lo}
+    while not stop.is_set():
+        try: m, src = s.recvfrom(1500)
+        except socket.timeout: continue
+        answer(s, m, src, 4, rec)
+
+
+class Dual(ThreadingHTTPServer):
     address_family = socket.AF_INET6
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0); super().server_bind()
 
 
 got = []                                    # the media server's clients
@@ -69,16 +90,26 @@ class Media(Handler):
 
 
 async def main(e):
-    stop = threading.Event(); threading.Thread(target=responder, args=(stop,), daemon=True).start()
-    httpd = V6(("::", MEDIA), Media); threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    stop = threading.Event()
+    for r in (responder6, responder4): threading.Thread(target=r, args=(stop,), daemon=True).start()
+    httpd = Dual(("::", MEDIA), Media); threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         ha = await home_assistant(e)
         size0 = os.path.getsize(e.play)
-        ha.cli.media_player_command(ha.mp[0].key, media_url=f"http://{NAME}:{MEDIA}/a.wav"); await sync(ha.cli)
+        ha.cli.media_player_command(ha.mp[0].key, media_url=f"http://{BOTH}:{MEDIA}/a.wav"); await sync(ha.cli)
         await until(lambda: got and os.path.getsize(e.play) > size0 + 20000, 10)
-        check(asked and all(t == 28 for t, _ in asked) and any(u for _, u in asked), f"asked for AAAA, a unicast answer wanted: {asked}")
+        q = [(t, u, f) for n, t, u, f in asked if n == BOTH]
+        check(q and q[0] == (28, 1, 6) and not any(t == 1 for t, _, _ in q), f"a name with both: AAAA asked first (unicast answer), A never: {q}")
         check(got == [ula()], f"the media fetched over IPv6, from the Echo's ULA: {got}")
         check(os.path.getsize(e.play) > size0 + 20000, f"and played ({os.path.getsize(e.play) - size0} bytes)")
+
+        await asyncio.sleep(1); got.clear(); size1 = os.path.getsize(e.play)
+        ha.cli.media_player_command(ha.mp[0].key, media_url=f"http://{V4}:{MEDIA}/a.wav"); await sync(ha.cli)
+        await until(lambda: got and os.path.getsize(e.play) > size1 + 20000, 15)
+        q = [(t, f) for n, t, u, f in asked if n == V4]
+        check(q and q[0] == (28, 6) and (1, 4) in q and q.index((1, 4)) > 0, f"a name with IPv4 alone: AAAA first, then A over IPv4: {q}")
+        check(got and got[0] in ("::ffff:127.0.0.1", "127.0.0.1"), f"the media fetched over IPv4: {got}")
+        check(os.path.getsize(e.play) > size1 + 20000, f"and played ({os.path.getsize(e.play) - size1} bytes)")
         await ha.cli.disconnect()
     finally:
         stop.set(); httpd.shutdown()

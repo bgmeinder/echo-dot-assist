@@ -4,7 +4,7 @@ device on the network that Home Assistant does not know: two networks merge thro
 gets nothing, an Echo alone starts a network, without tags or permission no key goes anywhere, the volume-key pairing
 (SIGWINCH, no HA).  The other ways in: fake_ha_arbitration_join.py; who answers: _rounds.py, Kiosk Satellite mode:
 _kiosk.py, the learned window: _window.py."""
-import asyncio, os, socket, struct
+import asyncio, os, socket, struct, time
 from aioesphomeapi import APIClient
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -33,6 +33,14 @@ async def main():
     arb = a.page.state()["arbitration"]
     check(arb["network"] == "0000000000000002" and [(m["node"], m["ip"]) for m in arb["members"]] == [("echo-living-room", own_addr())]
           and arb["tag"] == "tag." + a.tag() and not arb["others"], f"settings page: the network, its member with its address, the tag: {arb}")
+    # IPv6 first, IPv4 too: each packet goes both ways, and the member is still shown at its ULA (addr_take keeps the better)
+    sn = arb_listener(both=True); froms = set(); end = time.monotonic() + 4
+    while time.monotonic() < end and len(froms) < 2:
+        try: _, src = sn.recvfrom(1500); froms.add("v4" if src[0].startswith("::ffff:") else "v6")
+        except BlockingIOError: await asyncio.sleep(0.05)
+    sn.close()
+    check(froms == {"v4", "v6"} and [m["ip"] for m in a.page.state()["arbitration"]["members"]] == [own_addr()],
+          f"the beacons come over IPv6 and IPv4 both, the member kept at its ULA ({sorted(froms)})")
     n = len(ha.scans); await asyncio.sleep(SCAN * 1.5)
     check(len(ha.scans) == n, f"both in one network: no more scans ({len(ha.scans) - n} since)")
     a.allowed = b.allowed = True

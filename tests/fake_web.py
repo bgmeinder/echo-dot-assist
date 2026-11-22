@@ -48,7 +48,7 @@ async def main():
     with open(os.path.join(state, "settings"), "w") as f: f.write("2 -22 1 0 0 1 0 de 2 1 -1 1 0 5 0\n")   # the file before names
     with open(os.path.join(state, "preset"), "w") as f: f.write("# from another Echo's page\ndo_not_disturb=on\nscreen_adaptive_colour=on\nno_such_thing=1\n")   # scripts/setup.sh --preset
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(state, "play.raw"),
-               HASSMIC_MDNS_FILE=os.path.join(state, "none"), HASSMIC_ARB_ADDR="ff02::114", HASSMIC_MODELS=os.path.join(state, "models"),
+               HASSMIC_MDNS_FILE=os.path.join(state, "none"), HASSMIC_ARB_ADDR="ff02::114", HASSMIC_ARB_ADDR4="127.255.255.255", HASSMIC_MODELS=os.path.join(state, "models"),
                HASSMIC_FAKE_WHISPER="1", HASSMIC_ADB_OPEN=os.path.join(state, "adb-open.root"),
                HASSMIC_FAKE_SOUND_MODEL=os.path.join(state, "aed-model"),           # which sound model there is (sound_none.c)
                HASSMIC_LOG=os.path.join(state, "log"),                              # boot.log, for the page's viewer
@@ -395,7 +395,7 @@ async def login_runs_out():
     left on.  /api/hello names each start, so the page tells the new process from the old one (web/app.js waitBack)"""
     state = tempfile.mkdtemp(); leds = os.path.join(state, "ledctrl.log"); log = os.path.join(state, "log")
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(state, "play.raw"),
-               HASSMIC_MDNS_FILE=os.path.join(state, "none"), HASSMIC_ARB_ADDR="ff02::114", HASSMIC_FAKE_LED=leds,
+               HASSMIC_MDNS_FILE=os.path.join(state, "none"), HASSMIC_ARB_ADDR="ff02::114", HASSMIC_ARB_ADDR4="127.255.255.255", HASSMIC_FAKE_LED=leds,
                HASSMIC_LOGIN_MS="1500")
     run = lambda: subprocess.Popen([f"{ROOT}/build/hassmic-host", "-P", "esphome", "-p", str(PORT2), "-n", "Echo Two", "-L", "-z", "0",
                                     "-o", "0", "-a", "16977", "-W", str(WEB2)], env=env, stderr=open(log, "a"))

@@ -4,7 +4,7 @@ device's events whatever its permission (esphome.tag_scanned: the tag integratio
 scan's time), answers any device's request for a state (no permission needed), and runs an action a device asks for
 ("Allow the device to perform Home Assistant actions") that names another device's own action
 (esphome.<node>_arbitration_key) on that device.
-Everything goes out as loopback broadcast (HASSMIC_ARB_ADDR): nothing of it reaches the LAN.  The network's own pace
+Everything goes out on the test's own network namespace (HASSMIC_ARB_ADDR, HASSMIC_ARB_ADDR4): nothing of it reaches the LAN.  The network's own pace
 (beacons, discovery, tags, key handoff, pairing) runs at SCALE of the real one (HASSMIC_ARB_SCALE, arb.c PACE): at
 the real one a join by the action alone waits out half a minute.  Rounds and the window keep their real times."""
 import asyncio, base64, datetime, os, re, signal, socket, subprocess, sys, tempfile, time
@@ -63,10 +63,12 @@ def arb_sender():
     return tx, lambda p: tx.sendto(p, (GROUP, ARB, 0, idx))
 
 
-def arb_listener():
-    """a socket that hears what the Echos send to their group (non-blocking)"""
+def arb_listener(both=False):
+    """a socket that hears what the Echos send to their group (non-blocking): IPv6's copy of each packet, or with both
+    IPv4's broadcast copy as well (each packet then twice)"""
     import struct
     sn = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    sn.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0 if both else 1)
     sn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); sn.bind(("::", ARB))
     sn.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, socket.inet_pton(socket.AF_INET6, GROUP) + struct.pack("@I", socket.if_nametoindex(arb_iface())))
     sn.setblocking(False)
@@ -84,7 +86,7 @@ class Echo:
         self.env = dict(os.environ, HASSMIC_LOGIN_MS="60000:300",     # (browsers log in one after the other here: web.c keeps others back 0.3 s after a press, not 30)
                                     HASSMIC_STATE=self.state, HASSMIC_SETTINGS=os.path.join(self.state, "settings"),
                         HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(self.state, "play.raw"),
-                        HASSMIC_MDNS_FILE=os.path.join(self.state, "none"), HASSMIC_ARB_ADDR=GROUP, HASSMIC_KIOSK_ADDR=BCAST, HASSMIC_KIOSK_PORT=str(KIOSK),
+                        HASSMIC_MDNS_FILE=os.path.join(self.state, "none"), HASSMIC_ARB_ADDR=GROUP, HASSMIC_ARB_ADDR4=BCAST, HASSMIC_KIOSK_ADDR=BCAST, HASSMIC_KIOSK_PORT=str(KIOSK),
                         HASSMIC_TEST_SCORE=str(score), HASSMIC_MODELS=os.path.join(self.state, "models"), HASSMIC_ARB_SCALE=str(SCALE))
         os.makedirs(os.path.join(self.state, "models", "echo-de"))
         open(os.path.join(self.state, "models", "echo-de", "pryon.manifest"), "w").close()

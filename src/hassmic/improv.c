@@ -566,8 +566,8 @@ static void *worker(void *arg)
             char ip[48] = "", why[32] = ""; int r = wifi_join_result(join_id, ip, sizeof ip, why, sizeof why);
             if (!r && now - join_at > JOIN_SECS) { r = -1; snprintf(why, sizeof why, "timeout"); }
             if (r > 0) {
-                char url[80] = "";
-                if (core_web_port) snprintf(url, sizeof url, "http://%s:%d/", ip, core_web_port);
+                char url[80] = "";                  /* an IPv6 address (wifi.sh shows it first) in brackets */
+                if (core_web_port) snprintf(url, sizeof url, strchr(ip, ':') ? "http://[%s]:%d/" : "http://%s:%d/", ip, core_web_port);
                 fprintf(stderr, "improv: on the network, address %s\n", ip);
                 /* the button's time is spent on it: another switch needs another press (not set up: may() does
                  * not ask the button) */

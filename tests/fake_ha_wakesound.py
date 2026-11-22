@@ -38,7 +38,7 @@ async def run(removal, noise, **extra):
     # next line of hassmic's log reader (a process of its own, still writing as hassmic ends) over the file's start
     logpath = os.path.join(state, "log"); open(logpath, "w").close(); log = open(logpath, "a")
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_CAP=noise, HASSMIC_FAKE_ECHO="90:-20",
-               HASSMIC_PLAY=os.path.join(state, "play.raw"), HASSMIC_ARB_ADDR="ff02::114",
+               HASSMIC_PLAY=os.path.join(state, "play.raw"), HASSMIC_ARB_ADDR="ff02::114", HASSMIC_ARB_ADDR4="127.255.255.255",
                HASSMIC_MODELS=os.path.join(state, "models"), HASSMIC_MDNS_FILE=os.path.join(state, "mdns"))
     env.update(extra)
     proc = subprocess.Popen([f"{ROOT}/build/hassmic-host", "-P", "esphome", "-p", str(PORT), "-n", "Echo Dot"], env=env, stderr=log)
