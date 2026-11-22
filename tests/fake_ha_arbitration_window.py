@@ -3,7 +3,7 @@
 member behind a repeater, played here with the network's key, whose claims reach it 300-360 ms after its own: what it
 learns, the log, the fixed window instead, a restart."""
 import asyncio, base64, hashlib, os, re, socket, struct, time
-from arbecho import ARB, BCAST, Echo, HA, Browser, check, until, start, run
+from arbecho import ARB, BCAST, Echo, HA, Browser, check, until, start, run, arb_sender, arb_listener, own_addr
 
 a = Echo("Echo Kitchen", 16961, 500, net=2)
 
@@ -11,8 +11,7 @@ a = Echo("Echo Kitchen", 16961, 500, net=2)
 async def main():
     ha = HA([a])
     await start((a,), ha)
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    send = lambda p: tx.sendto(p, (BCAST, ARB))
+    tx, send = arb_sender()
     node = lambda s: bytes([len(s)]) + s.encode()
     # It speaks the protocol with the network's key, as a real Echo would
     nid, k64 = a.net().split(); key = base64.b64decode(k64); nb8 = struct.pack("<Q", int(nid, 16))
@@ -23,8 +22,7 @@ async def main():
     def fbeacon(flags=b""): send(signed(b"HMA1\x01" + fpub + nb8 + node("echo-hallway") + fctr() + flags))
     kw = hashlib.blake2b(b"alexa", digest_size=8).digest()
     def fclaim(score=99999): send(signed(b"HMA1\x04" + nb8 + fid + fctr() + kw + struct.pack("<iBB", score, 0, 0)))
-    sn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); sn.bind(("", ARB)); sn.setblocking(False)
+    sn = arb_listener()
     apk = a.pub()[:8]
     async def a_claimed(secs=2):                    # the kitchen Echo's own claim (not its "answers"), when it went out
         end = time.monotonic() + secs

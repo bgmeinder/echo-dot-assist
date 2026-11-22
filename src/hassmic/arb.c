@@ -123,6 +123,9 @@
  * outside the firewall's inbound 16384-32767: lockdown.sh admits it while state/config says arbitration_mode=kiosk.
  * The socket is the loop's own: opened and closed there as the mode changes, so no other thread ever polls a closed one.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE                     /* struct in6_pktinfo on glibc */
+#endif
 #include "logread.h"
 #include "arb.h"
 #include <arpa/inet.h>
@@ -130,6 +133,8 @@
 #include <errno.h>
 #include <math.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
@@ -231,7 +236,8 @@ enum { F_QUIET = 1, F_KIOSK = 2, F_HELLO = 4 };
 
 static pthread_mutex_t lk = PTHREAD_MUTEX_INITIALIZER; /* everything below; taken after core_lock, never before it */
 static int sock = -1, running, arbitrate = 1;    /* arbitrate: take part in rounds (the network runs regardless) */
-static struct sockaddr_in dest;
+static struct sockaddr_in6 dest;        /* ARB_GROUP on the LAN's interface (arb_iface) */
+static int dest_fixed;                  /* HASSMIC_ARB_ADDR named the interface ("group%iface"): only that one */
 static const struct arb_hooks *hooks;
 static char node[NLEN];
 static uint8_t sk[32], pk[32];
@@ -244,14 +250,14 @@ static long long started, beacon_at, answer_at, beacon_gap, hello_until;
 static int reported_peers = -1;
 static atomic_int notify;
 
-static struct peer { uint8_t id[8]; uint64_t ctr; long long seen; char node[NLEN]; uint32_t ip; int quiet, kiosk; } peers[NPEER];   /* node, ip, quiet (no rounds), kiosk: from its beacons */
+static struct peer { uint8_t id[8]; uint64_t ctr; long long seen; char node[NLEN]; struct in6_addr ip; int quiet, kiosk; } peers[NPEER];   /* node, ip, quiet (no rounds), kiosk: from its beacons */
 static struct claim { uint8_t id[8], kw[8]; int score, prio, won; long long at; } claims[NCLAIM];
 static unsigned claim_next;
 static struct cand {                                    /* Echos outside our network */
     uint8_t pub[32]; char node[NLEN]; uint64_t net;
     int attested;                                       /* HA showed a scan of its tag after our first read */
     char tag0[48];                                      /* its tag's state at our first read ("": no answer yet) */
-    uint32_t ip;                                        /* where its beacons come from (network byte order), for the settings page */
+    struct in6_addr ip;                                 /* where its beacons come from, for the settings page */
     long long seen, first, pushed, gave, polled;        /* pushed: through the action; gave: on the LAN */
 } cands[NPEER];
 static struct push { char node[NLEN], net[20], key[160]; } pushes[NPEER];     /* for Home Assistant, sent outside the lock */
@@ -303,7 +309,7 @@ static int kunlogged;                                   /* anyone on the LAN can
 static struct { char p[KIOSK_PHRASE]; int e; } kround;
 static struct { uint8_t p[256]; size_t n; long long at; int left; } copies[2];    /* claims and "answers": copies still due */
 static const uint8_t to_all[8] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };    /* a T_MSG for every member */
-static struct msg { uint8_t from[8], p[ARB_MSG_MAX]; size_t n; char node[NLEN]; uint32_t ip; int all; } msgs[8];   /* for hooks->message, */
+static struct msg { uint8_t from[8], p[ARB_MSG_MAX]; size_t n; char node[NLEN]; struct in6_addr ip; int all; } msgs[8];   /* for hooks->message, */
 static int nmsg;                                        /* handed over outside the lock */
 static int wake_fd[2] = { -1, -1 };                     /* a byte wakes the loop: copies are due before its next poll ends */
 static char kpkt[300];
@@ -424,10 +430,69 @@ static int tag_ok(const uint8_t *p, size_t n)
     return !crypto_verify16(t, p + n - 16);
 }
 
+/* Echos find each other by IPv6 multicast on their LAN: ARB_GROUP, of link-local scope (ff02::114, IANA's group for
+ * private experiments), on the interface that holds the Echo's network: the first one up, multicast, not loopback,
+ * with the best IPv6 address of all (a ULA, else a global one; HASSMIC_ARB_ADDR "group%iface" names it, for the tests).  Sent from the Echo's ULA there
+ * (fc00::/7: a home network's fd00: address), else its global address, else whatever the kernel takes: a peer keeps
+ * the address a packet came from as this Echo's and Drop In's audio goes there, so that is the ULA, which stays, and
+ * not a global address that rotates.  Looked at again every 10 s (Wi-Fi back, a new address). */
+#define ARB_GROUP "ff02::114"
+#define HAS_IP(a) (!IN6_IS_ADDR_UNSPECIFIED(&(a)))
+static unsigned arb_if;
+static struct in6_addr arb_src;
+static long long arb_if_at;
+
+static void arb_iface(long long now)
+{
+    if (arb_if_at && now - arb_if_at < 10000) return;
+    arb_if_at = now;
+    struct ifaddrs *ifs, *i; unsigned best_if = 0; struct in6_addr best = in6addr_any; int rank = 0;   /* 3 ULA, 2 global, 1 link-local */
+    char name[IF_NAMESIZE] = "";
+    if (getifaddrs(&ifs)) return;
+    for (i = ifs; i; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET6 || !(i->ifa_flags & IFF_UP) || (i->ifa_flags & IFF_LOOPBACK)
+            || !(i->ifa_flags & IFF_MULTICAST)) continue;
+        unsigned x = if_nametoindex(i->ifa_name);
+        if (dest_fixed && x != dest.sin6_scope_id) continue;
+        const struct in6_addr *a = &((const struct sockaddr_in6 *)i->ifa_addr)->sin6_addr;
+        int r = (a->s6_addr[0] & 0xfe) == 0xfc ? 3 : IN6_IS_ADDR_LINKLOCAL(a) ? 1 : 2;
+        if (r > rank) { rank = r; best = *a; best_if = x; snprintf(name, sizeof name, "%s", i->ifa_name); }
+    }
+    freeifaddrs(ifs);
+    if (!best_if) return;
+    struct in6_addr src = rank >= 2 ? best : in6addr_any;
+    if (best_if == arb_if && !memcmp(&src, &arb_src, sizeof src)) return;
+    struct ipv6_mreq mr; memset(&mr, 0, sizeof mr); mr.ipv6mr_multiaddr = dest.sin6_addr; mr.ipv6mr_interface = best_if;
+    if (best_if != arb_if) {
+        if (arb_if) { struct ipv6_mreq old = mr; old.ipv6mr_interface = arb_if; setsockopt(sock, IPPROTO_IPV6, IPV6_LEAVE_GROUP, &old, sizeof old); }
+        if (setsockopt(sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mr, sizeof mr) && errno != EADDRINUSE)
+            fprintf(stderr, "arbitration: joining %s on %s: %s\n", ARB_GROUP, name, strerror(errno));
+        setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_IF, &best_if, sizeof best_if);
+    }
+    arb_if = best_if; arb_src = src; dest.sin6_scope_id = best_if;
+    char a[INET6_ADDRSTRLEN] = "the kernel's choice";
+    if (HAS_IP(src)) inet_ntop(AF_INET6, &src, a, sizeof a);
+    fprintf(stderr, "arbitration: on %s, from %s\n", name, a);
+}
+
+unsigned arb_ifindex(void) { return arb_if; }
+
 static void send_pkt(const struct pkt *b)
 {
     static int last_err;
-    if (sendto(sock, b->p, b->n, 0, (const struct sockaddr *)&dest, sizeof dest) >= 0) { last_err = 0; return; }
+    arb_iface(now_ms());
+    struct iovec iov = { (void *)b->p, b->n };
+    union { char buf[CMSG_SPACE(sizeof(struct in6_pktinfo))]; struct cmsghdr align; } u;
+    struct msghdr m; memset(&m, 0, sizeof m);
+    m.msg_name = &dest; m.msg_namelen = sizeof dest; m.msg_iov = &iov; m.msg_iovlen = 1;
+    if (HAS_IP(arb_src)) {                              /* from the ULA: what the others keep as this Echo's address */
+        memset(&u, 0, sizeof u); m.msg_control = u.buf; m.msg_controllen = sizeof u.buf;
+        struct cmsghdr *c = CMSG_FIRSTHDR(&m);
+        c->cmsg_level = IPPROTO_IPV6; c->cmsg_type = IPV6_PKTINFO; c->cmsg_len = CMSG_LEN(sizeof(struct in6_pktinfo));
+        struct in6_pktinfo pi; memset(&pi, 0, sizeof pi); pi.ipi6_addr = arb_src; pi.ipi6_ifindex = arb_if;
+        memcpy(CMSG_DATA(c), &pi, sizeof pi);
+    }
+    if (sendmsg(sock, &m, 0) >= 0) { last_err = 0; return; }
     if (errno != last_err) fprintf(stderr, "arbitration: send: %s\n", strerror(errno));      /* once, not every beacon while Wi-Fi is down */
     last_err = errno;
 }
@@ -767,7 +832,7 @@ static void tag_entity(char out[TLEN], const uint8_t pub[32])
 
 static void poll_tag(const uint8_t pub[32]) { if (npoll < NPEER) tag_entity(polls[npoll++], pub); }
 
-static void on_packet(const uint8_t *p, size_t n, long long now, uint32_t ip)
+static void on_packet(const uint8_t *p, size_t n, long long now, const struct in6_addr *ip)
 {
     struct rd r = { p, p + n, 0 }; const uint8_t *m = take(&r, 5);
     if (!m || memcmp(m, "HMA1", 4)) return;
@@ -787,7 +852,7 @@ static void on_packet(const uint8_t *p, size_t n, long long now, uint32_t ip)
              * answer, or it would not count us until our next beacon.  Not rate limited: only a holder of K gets here, once
              * per fresh counter */
             int f = fresh(pub, c, now);
-            if (f) { struct peer *pp = peer(pub); snprintf(pp->node, NLEN, "%s", nd); pp->ip = ip; pp->quiet = flags & F_QUIET; pp->kiosk = !!(flags & F_KIOSK); }
+            if (f) { struct peer *pp = peer(pub); snprintf(pp->node, NLEN, "%s", nd); pp->ip = *ip; pp->quiet = flags & F_QUIET; pp->kiosk = !!(flags & F_KIOSK); }
             if (f && (!known || (flags & F_HELLO))) beacon(1);
             return;
         }
@@ -796,7 +861,7 @@ static void on_packet(const uint8_t *p, size_t n, long long now, uint32_t ip)
          * make up new keys, and each scan is a logbook entry in HA) */
         static long long sped;
         if (!c->first) { c->first = now; if (!ago(sped, now, SCAN_SLOW_MS)) { sped = now; scans = 0; } }
-        c->ip = ip;
+        c->ip = *ip;
         snprintf(c->node, NLEN, "%s", nd); c->net = net; c->seen = now;
         if (in_net && !net && !ago(answer_at, now, 1000)) { answer_at = now; beacon(1); }       /* someone looking: here we are */
         push(c, now);
@@ -835,7 +900,7 @@ static void on_packet(const uint8_t *p, size_t n, long long now, uint32_t ip)
             || !tag_ok(p, n) || !fresh(from, c, now) || nmsg == (int)(sizeof msgs / sizeof msgs[0])) return;
         struct msg *m = &msgs[nmsg++]; struct peer *pp = peer(from);
         memcpy(m->from, from, 8); memcpy(m->p, q, *l); m->n = *l; m->all = !memcmp(to, to_all, 8);
-        snprintf(m->node, NLEN, "%s", pp->node); m->ip = ip;       /* where it came from: its beacons may still be on the way */
+        snprintf(m->node, NLEN, "%s", pp->node); m->ip = *ip;      /* where it came from: its beacons may still be on the way */
     } break;
     case T_CLAIM: {
         uint64_t net = get64(&r); const uint8_t *id = take(&r, 8); uint64_t c = get64(&r); const uint8_t *kw = take(&r, 8), *s = take(&r, 4), *pw = take(&r, 2);
@@ -981,7 +1046,11 @@ static void kiosk_send(void)
 {
     static int last_err;
     if (ksock < 0) return;
-    struct sockaddr_in to = dest; const char *pe = getenv("HASSMIC_KIOSK_PORT");
+    /* Kiosk Satellite's protocol is the app's own: IPv4 broadcast, as the tablets send and listen (HASSMIC_KIOSK_ADDR:
+     * the tests' loopback broadcast).  On a network without IPv4 it reaches no tablet; the Echos' own is IPv6 (above) */
+    struct sockaddr_in to; const char *pe = getenv("HASSMIC_KIOSK_PORT"), *ka = getenv("HASSMIC_KIOSK_ADDR");
+    memset(&to, 0, sizeof to); to.sin_family = AF_INET;
+    to.sin_addr.s_addr = ka ? inet_addr(ka) : htonl(INADDR_BROADCAST);
     to.sin_port = htons((uint16_t)(pe ? atoi(pe) : KIOSK_PORT));
     if (sendto(ksock, kpkt, kpkt_n, 0, (const struct sockaddr *)&to, sizeof to) >= 0) { last_err = 0; return; }
     if (errno != last_err) fprintf(stderr, "arbitration: kiosk send: %s\n", strerror(errno));
@@ -1065,9 +1134,9 @@ static void *loop(void *arg)
         wait = due - now_ms() < 0 ? 0 : (int)(due - now_ms());
         if (poll(pf, 3, wait) > 0) {
             if (pf[2].revents & POLLIN) { char c[16]; if (read(wake_fd[0], c, sizeof c) < 0) {} }    /* only to plan again */
-            struct sockaddr_in from; socklen_t fl = sizeof from; ssize_t n;
+            struct sockaddr_in6 from; socklen_t fl = sizeof from; ssize_t n;
             if ((pf[0].revents & POLLIN) && (n = recvfrom(sock, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl)) > 0) {
-                pthread_mutex_lock(&lk); on_packet(buf, (size_t)n, now_ms(), from.sin_addr.s_addr); pthread_mutex_unlock(&lk);
+                pthread_mutex_lock(&lk); on_packet(buf, (size_t)n, now_ms(), &from.sin6_addr); pthread_mutex_unlock(&lk);
             }
             if ((pf[1].revents & POLLIN) && (n = recv(pf[1].fd, buf, sizeof buf - 1, 0)) > 0) {
                 buf[n] = 0;
@@ -1179,7 +1248,7 @@ static void *loop(void *arg)
         if (sd && hooks->scan) hooks->scan(self_tag);
         int pe = atomic_exchange(&pair_event, 0);
         if (pe && hooks->paired) hooks->paired(pe);
-        for (int i = 0; i < nm; i++) if (hooks->message) hooks->message(mq[i].from, mq[i].node, mq[i].ip, mq[i].p, mq[i].n, mq[i].all);
+        for (int i = 0; i < nm; i++) if (hooks->message) hooks->message(mq[i].from, mq[i].node, &mq[i].ip, mq[i].p, mq[i].n, mq[i].all);
         crypto_wipe(mq, sizeof mq);
         if (atomic_exchange(&notify, 0) && hooks->changed) hooks->changed();
     }
@@ -1392,7 +1461,7 @@ static size_t jstr(char *o, size_t cap, const char *s)          /* node names: [
 
 size_t arb_status_json(char *o, size_t cap)
 {
-    size_t n = 0; long long now = now_ms(); char t[NLEN], ip[INET_ADDRSTRLEN]; int k = 0;
+    size_t n = 0; long long now = now_ms(); char t[NLEN], ip[INET6_ADDRSTRLEN]; int k = 0;
 #define J(...) do { if (n < cap) n += (size_t)snprintf(o + n, cap - n, __VA_ARGS__); } while (0)
     pthread_mutex_lock(&lk);
     J("{\"running\":%s,\"arbitrates\":%s,\"node\":\"%s\",\"mode\":\"%s\",\"kiosk_port\":%s,", running ? "true" : "false",
@@ -1407,21 +1476,21 @@ size_t arb_status_json(char *o, size_t cap)
     if (q >= 0) J("%d},", q); else J("null},");
     J("\"members\":[");
     for (int i = 0; i < NPEER; i++) if (ago(peers[i].seen, now, PEER_TTL_MS)) {
-        struct in_addr a = { peers[i].ip }; inet_ntop(AF_INET, &a, ip, sizeof ip); jstr(t, sizeof t, peers[i].node);
+        inet_ntop(AF_INET6, &peers[i].ip, ip, sizeof ip); jstr(t, sizeof t, peers[i].node);
         int v[NDELAY], nv = samples_of(&peers[i], v); const struct rival *rv = rival(peers[i].id, 0);
         /* quiet with the kiosk flag: it takes part, the kiosk way.  late_ms: 95 % of its claims came within it; rounds:
          * of ours kept for it (OBS_KEEP at most), close: in how many it beat ours or came within RIVAL_DB */
         J("%s{\"node\":\"%s\",\"ip\":\"%s\",\"seen_s\":%lld,\"arbitrates\":%s,\"mode\":\"%s\",\"rounds\":%u,\"close\":%d,\"late_ms\":",
-          k++ ? "," : "", t, peers[i].ip ? ip : "", (now - peers[i].seen) / 1000, peers[i].quiet && !peers[i].kiosk ? "false" : "true",
+          k++ ? "," : "", t, HAS_IP(peers[i].ip) ? ip : "", (now - peers[i].seen) / 1000, peers[i].quiet && !peers[i].kiosk ? "false" : "true",
           peers[i].kiosk ? "kiosk" : "hassmic", rv ? rv->n : 0, close_calls(rv));
         if (nv >= AUTO_PEER_MIN) J("%d}", p95(v, nv)); else J("null}");
     }
     J("],\"others\":["); k = 0;
     for (int i = 0; i < NPEER; i++) if (ago(cands[i].seen, now, PEER_TTL_MS)) {
         struct cand *c = &cands[i]; const char *st;
-        struct in_addr a = { c->ip }; inet_ntop(AF_INET, &a, ip, sizeof ip); jstr(t, sizeof t, c->node);
+        inet_ntop(AF_INET6, &c->ip, ip, sizeof ip); jstr(t, sizeof t, c->node);
         st = !c->net ? "none" : in_net && c->net > net_id ? "younger" : "older";      /* none: not in a network (yet) */
-        J("%s{\"node\":\"%s\",\"ip\":\"%s\",\"network\":", k++ ? "," : "", t, c->ip ? ip : "");
+        J("%s{\"node\":\"%s\",\"ip\":\"%s\",\"network\":", k++ ? "," : "", t, HAS_IP(c->ip) ? ip : "");
         if (c->net) J("\"%016llx\"", (unsigned long long)c->net); else J("null");
         J(",\"state\":\"%s\",\"for_s\":%lld,\"key_confirmed\":%s}", st, (now - c->first) / 1000, c->attested ? "true" : "false");
     }
@@ -1442,11 +1511,11 @@ int arb_web_key(unsigned char out[32])
 
 size_t arb_members_json(char *o, size_t cap)
 {
-    size_t n = 0; long long now = now_ms(); char t[NLEN], ip[INET_ADDRSTRLEN]; int k = 0;
+    size_t n = 0; long long now = now_ms(); char t[NLEN], ip[INET6_ADDRSTRLEN]; int k = 0;
     pthread_mutex_lock(&lk);
     n += (size_t)snprintf(o + n, cap - n, "[");
-    for (int i = 0; running && in_net && i < NPEER && n < cap; i++) if (ago(peers[i].seen, now, PEER_TTL_MS) && peers[i].ip) {
-        struct in_addr a = { peers[i].ip }; inet_ntop(AF_INET, &a, ip, sizeof ip); jstr(t, sizeof t, peers[i].node);
+    for (int i = 0; running && in_net && i < NPEER && n < cap; i++) if (ago(peers[i].seen, now, PEER_TTL_MS) && HAS_IP(peers[i].ip)) {
+        inet_ntop(AF_INET6, &peers[i].ip, ip, sizeof ip); jstr(t, sizeof t, peers[i].node);
         n += (size_t)snprintf(o + n, cap - n, "%s{\"node\":\"%s\",\"ip\":\"%s\"}", k++ ? "," : "", t, ip);
     }
     if (n < cap) n += (size_t)snprintf(o + n, cap - n, "]");
@@ -1454,12 +1523,12 @@ size_t arb_members_json(char *o, size_t cap)
     return n < cap ? n : cap - 1;
 }
 
-int arb_member(const char *nd, unsigned char id[8], unsigned *ip)
+int arb_member(const char *nd, unsigned char id[8], struct in6_addr *ip)
 {
     int r = -1; long long now = now_ms();
     pthread_mutex_lock(&lk);
     for (int i = 0; running && in_net && i < NPEER; i++)
-        if (ago(peers[i].seen, now, PEER_TTL_MS) && peers[i].ip && !strcmp(peers[i].node, nd)) { memcpy(id, peers[i].id, 8); *ip = peers[i].ip; r = 0; break; }
+        if (ago(peers[i].seen, now, PEER_TTL_MS) && HAS_IP(peers[i].ip) && !strcmp(peers[i].node, nd)) { memcpy(id, peers[i].id, 8); *ip = peers[i].ip; r = 0; break; }
     pthread_mutex_unlock(&lk);
     return r;
 }
@@ -1517,7 +1586,7 @@ int arb_rounds(void) { pthread_mutex_lock(&lk); int r = running && arbitrate && 
 
 int arb_start(int port, const char *nd, const struct arb_hooks *h)
 {
-    int on = 1; struct sockaddr_in a; const char *addr = getenv("HASSMIC_ARB_ADDR");   /* tests: 127.255.255.255 */
+    int on = 1; struct sockaddr_in6 a; const char *addr = getenv("HASSMIC_ARB_ADDR");   /* tests: "ff02::114%eth0" */
     pthread_t t; const char *sc = getenv("HASSMIC_ARB_SCALE");
     if (sc && atof(sc) > 0) pace = (long long)(atof(sc) * 1000 + 0.5);
     rivals_on = !(sc = getenv("HASSMIC_ARB_RIVALS")) || atoi(sc);
@@ -1529,12 +1598,19 @@ int arb_start(int port, const char *nd, const struct arb_hooks *h)
     memcpy(self_tag, "hassmic_", 8);
     for (int i = 0; i < 32; i++) snprintf(self_tag + 8 + 2 * i, 3, "%02x", pk[i]);
     ctr = ctr_saved; ctr_saved += CTR_BLOCK; save();
-    if ((sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0)) < 0) { perror("arbitration: socket"); return -1; }
+    if ((sock = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0)) < 0) { perror("arbitration: socket"); return -1; }
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
-    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &on, sizeof on);
-    memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port); a.sin_addr.s_addr = htonl(INADDR_ANY);
+    setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof on);
+    memset(&a, 0, sizeof a); a.sin6_family = AF_INET6; a.sin6_port = htons((uint16_t)port); a.sin6_addr = in6addr_any;
     if (bind(sock, (struct sockaddr *)&a, sizeof a)) { perror("arbitration: bind"); close(sock); sock = -1; return -1; }
-    dest = a; dest.sin_addr.s_addr = addr ? inet_addr(addr) : htonl(INADDR_BROADCAST);
+    dest = a;
+    char grp[64]; snprintf(grp, sizeof grp, "%s", addr ? addr : ARB_GROUP);
+    char *pct = strchr(grp, '%');
+    if (pct) { *pct = 0; dest.sin6_scope_id = if_nametoindex(pct + 1); dest_fixed = dest.sin6_scope_id != 0; }
+    if (inet_pton(AF_INET6, grp, &dest.sin6_addr) != 1 || !IN6_IS_ADDR_MULTICAST(&dest.sin6_addr)) {
+        fprintf(stderr, "arbitration: %s is not an IPv6 multicast group\n", grp); close(sock); sock = -1; return -1;
+    }
+    arb_iface(now_ms());                                /* (none yet: the next send looks again) */
     if (pipe(wake_fd) == 0) for (int i = 0; i < 2; i++) { fcntl(wake_fd[i], F_SETFL, O_NONBLOCK); fcntl(wake_fd[i], F_SETFD, FD_CLOEXEC); }
     else wake_fd[0] = wake_fd[1] = -1;                  /* copies then go out within the loop's 100 ms */
     started = now_ms(); hello_until = started + BEACON_MAX_MS; running = 1;

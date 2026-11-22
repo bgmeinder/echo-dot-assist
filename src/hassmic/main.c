@@ -2580,7 +2580,7 @@ static int arb_scan(const char *tag_id)
 
 /* A member's message: to every member, the duck's (duck.c) and the rings' (ringstop.c), each taking only its own kinds;
  * to us alone, Drop In's (an invite to all would ring every Echo) */
-static void arb_message(const unsigned char from[8], const char *node, unsigned ip, const unsigned char *p, size_t n, int all)
+static void arb_message(const unsigned char from[8], const char *node, const struct in6_addr *ip, const unsigned char *p, size_t n, int all)
 {
     if (all) { duck_message(from, node, p, n); ringstop_message(from, node, p, n); pf_message(from, node, ip, p, n); }
     else dropin_message(from, node, ip, p, n);

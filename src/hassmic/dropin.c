@@ -73,7 +73,7 @@ static struct {
     int invited;                                        /* the first invite went out (once the core knew: tell_core) */
     uint8_t id[8], peer[8];
     char node[64];
-    uint32_t ip; uint16_t port;                         /* the other Echo's audio address (network byte order ip) */
+    struct in6_addr ip; uint16_t port;                  /* the other Echo's audio address (its ULA: arb.c), port in network order */
     uint8_t esk[32], epk[32], key[32];
     long long since, sig_at, rx_at, live_at;
     int media;                                          /* call.c's generation while connected, -1 before */
@@ -228,11 +228,11 @@ static void end_call(const char *why, int tell, int result)
     crypto_wipe(c.esk, sizeof c.esk); crypto_wipe(c.key, sizeof c.key);
 }
 
-static void fresh_call(const uint8_t peer[8], const char *node, uint32_t ip, int outgoing)
+static void fresh_call(const uint8_t peer[8], const char *node, const struct in6_addr *ip, int outgoing)
 {
     memset(&c.id, 0, sizeof c.id);
     c.outgoing = outgoing; c.gen++; c.keyed = 0; c.rang = 0; c.invited = 0;
-    memcpy(c.peer, peer, 8); snprintf(c.node, sizeof c.node, "%s", node); c.ip = ip; c.port = 0;
+    memcpy(c.peer, peer, 8); snprintf(c.node, sizeof c.node, "%s", node); c.ip = *ip; c.port = 0;
     ws_random(c.esk, 32); crypto_x25519_public_key(c.epk, c.esk);
     c.since = c.sig_at = now_ms();
 }
@@ -315,7 +315,7 @@ int dropin_last(unsigned *attempt)
 /* A call refused here has a result all the same, which the loop reports (callers may hold core_lock) */
 int dropin_call(const char *target, char *err, size_t errsz)
 {
-    char node[64]; uint8_t id[8]; unsigned ip; int r = -1;
+    char node[64]; uint8_t id[8]; struct in6_addr ip; int r = -1;
     core_node_of(target, node);
     if (!running) { snprintf(err, errsz, "Drop In is not running on this Echo"); return -1; }       /* no loop to tell */
     const char *no = core_call_refusal(0);
@@ -330,7 +330,7 @@ int dropin_call(const char *target, char *err, size_t errsz)
     /* a plugin's call (call.h's claim): last, the claim is this call's from here on */
     else if (call_claim(CALL_DROPIN)) { snprintf(err, errsz, "already in another call"); r = DROPIN_R_BUSY_HERE; }
     if (r >= 0) { ev_push(-1, node, 1, r, 1); pthread_mutex_unlock(&dl); return -1; }
-    fresh_call(id, node, ip, 1);
+    fresh_call(id, node, &ip, 1);
     ws_random(c.id, 8);
     c.state = DROPIN_CALLING;
     fprintf(stderr, "drop in: calling %s\n", node);
@@ -372,7 +372,7 @@ int dropin_button(void)
     return st != DROPIN_IDLE;
 }
 
-void dropin_message(const unsigned char from[8], const char *node, unsigned ip, const unsigned char *p, size_t n)
+void dropin_message(const unsigned char from[8], const char *node, const struct in6_addr *ip, const unsigned char *p, size_t n)
 {
     uint8_t id[8], epk[32]; char reason[64] = ""; unsigned port; int kind;
     if (n < 44 || n < (size_t)44 + p[43]) return;
@@ -420,7 +420,7 @@ void dropin_message(const unsigned char from[8], const char *node, unsigned ip, 
         break;
     case M_ACCEPT:
         if (!same || !c.outgoing || c.state != DROPIN_CALLING) break;
-        c.port = htons((uint16_t)port); c.ip = ip;
+        c.port = htons((uint16_t)port); c.ip = *ip;
         if (!port || derive(epk)) { end_call("no key", 1, DROPIN_R_FAILED); break; }
         go_live(now);
         break;
@@ -444,7 +444,7 @@ void dropin_message(const unsigned char from[8], const char *node, unsigned ip, 
  * with call.c's tx_mu held (call.h); takes dl, never calls into call.c */
 static void send_audio(const uint8_t *frame, size_t len, uint32_t seq, void *arg)
 {
-    uint8_t pkt[17 + MAXPKT + 16], nonce[24] = { 0 }, key[32]; struct sockaddr_in to;
+    uint8_t pkt[17 + MAXPKT + 16], nonce[24] = { 0 }, key[32]; struct sockaddr_in6 to;
     (void)arg;
     if (len > MAXPKT) return;
     pthread_mutex_lock(&dl);
@@ -452,7 +452,8 @@ static void send_audio(const uint8_t *frame, size_t len, uint32_t seq, void *arg
     memcpy(key, c.key, 32);
     memcpy(pkt, "HMD1", 4); memcpy(pkt + 4, c.id, 8); pkt[12] = (uint8_t)!c.outgoing;
     for (int i = 0; i < 4; i++) pkt[13 + i] = (uint8_t)(seq >> 8 * i);
-    memset(&to, 0, sizeof to); to.sin_family = AF_INET; to.sin_addr.s_addr = c.ip; to.sin_port = c.port;
+    memset(&to, 0, sizeof to); to.sin6_family = AF_INET6; to.sin6_addr = c.ip; to.sin6_port = c.port;
+    if (IN6_IS_ADDR_LINKLOCAL(&c.ip)) to.sin6_scope_id = arb_ifindex();     /* an Echo with no ULA nor global address */
     pthread_mutex_unlock(&dl);
     memcpy(nonce, pkt + 4, 13);
     crypto_aead_lock(pkt + 17, pkt + 17 + len, key, nonce, pkt, 17, frame, len);
@@ -463,7 +464,7 @@ static void send_audio(const uint8_t *frame, size_t len, uint32_t seq, void *arg
     }
 }
 
-static void on_audio(const uint8_t *p, size_t n, const struct sockaddr_in *from)
+static void on_audio(const uint8_t *p, size_t n, const struct sockaddr_in6 *from)
 {
     uint8_t nonce[24] = { 0 }, frame[MAXPKT]; uint32_t seq = 0; int media;
     if (n < 17 + 1 + 16 || n > 17 + MAXPKT + 16 || memcmp(p, "HMD1", 4)) return;
@@ -478,7 +479,7 @@ static void on_audio(const uint8_t *p, size_t n, const struct sockaddr_in *from)
         c.rx_seen = !c.rx_any || ahead >= RX_WIN ? 1 : c.rx_seen << ahead | 1;
         c.rx_hi = seq; c.rx_any = 1;
         c.rx_at = now_ms();
-        c.ip = from->sin_addr.s_addr; c.port = from->sin_port;
+        c.ip = from->sin6_addr; c.port = from->sin6_port;
     } else if (back >= RX_WIN || (c.rx_seen >> back & 1)) { pthread_mutex_unlock(&dl); return; }   /* too old, or taken already */
     else c.rx_seen |= 1u << back;                       /* late, not seen yet: played if call.c still can */
     media = c.media;
@@ -519,7 +520,7 @@ static void *loop(void *arg)
     uint8_t buf[1500];
     (void)arg;
     for (;;) {
-        struct pollfd pf = { sock, POLLIN, 0 }; struct sockaddr_in from; socklen_t fl = sizeof from; ssize_t n;
+        struct pollfd pf = { sock, POLLIN, 0 }; struct sockaddr_in6 from; socklen_t fl = sizeof from; ssize_t n;
         if (poll(&pf, 1, 20) > 0 && (pf.revents & POLLIN) && (n = recvfrom(sock, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl)) > 0)
             on_audio(buf, (size_t)n, &from);
         if (atomic_exchange(&notify, 0)) tell_core();
@@ -530,16 +531,17 @@ static void *loop(void *arg)
 
 int dropin_start(int port)
 {
-    struct sockaddr_in a; pthread_t t; int tos = 0xb8;      /* DSCP EF: Wi-Fi's voice queue (WMM) where the AP honours it */
+    struct sockaddr_in6 a; pthread_t t; int tos = 0xb8, on = 1;     /* DSCP EF: Wi-Fi's voice queue (WMM) where the AP honours it */
     const char *times = getenv("HASSMIC_DROPIN_TIMES");
     if (!arb_running()) return -1;
     if (times) sscanf(times, "%d %d", &answer_ms, &lost_ms);
     late_idle = getenv("HASSMIC_DROPIN_LATE_IDLE");
     arb_self(self_id);
-    if ((sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0)) < 0) { perror("drop in: socket"); return -1; }
-    memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port); a.sin_addr.s_addr = htonl(INADDR_ANY);
+    if ((sock = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0)) < 0) { perror("drop in: socket"); return -1; }
+    setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof on);
+    memset(&a, 0, sizeof a); a.sin6_family = AF_INET6; a.sin6_port = htons((uint16_t)port); a.sin6_addr = in6addr_any;
     if (bind(sock, (struct sockaddr *)&a, sizeof a)) { perror("drop in: bind"); close(sock); sock = -1; return -1; }
-    setsockopt(sock, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
+    setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof tos);
     my_port = (uint16_t)port;
     running = 1;
     if (pthread_create(&t, NULL, loop, NULL)) { running = 0; return -1; }

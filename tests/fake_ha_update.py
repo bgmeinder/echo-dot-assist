@@ -98,7 +98,7 @@ async def main():
 
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_SETTINGS=os.path.join(state, "settings"),
                HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(tmp, "play.raw"),
-               HASSMIC_MDNS_FILE=os.path.join(tmp, "hassmic.service"), HASSMIC_ARB_ADDR="127.255.255.255",
+               HASSMIC_MDNS_FILE=os.path.join(tmp, "hassmic.service"), HASSMIC_ARB_ADDR="ff02::114",
                HASSMIC_MODELS=os.path.join(state, "models"), HASSMIC_ADB_OPEN=os.path.join(state, "adb-open.root"),
                HASSMIC_RELEASE_PUB=pub, HASSMIC_UPDATE_API=f"http://127.0.0.1:{GH_PORT}/repos/o/r",
                HASSMIC_UPDATE_DOWNLOAD=f"http://127.0.0.1:{GH_PORT}/dl")

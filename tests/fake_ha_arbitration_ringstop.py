@@ -10,7 +10,7 @@ wake word it heard without the "stop", is dropped.  The kitchen's window is fixe
 lands in it however slow the PC (the learnt one is 500 ms here)."""
 import asyncio, hashlib, base64, os, socket, struct, time
 from aioesphomeapi import VoiceAssistantEventType as Ev, VoiceAssistantTimerEventType as Tm
-from arbecho import ARB, BCAST, Echo, HA, check, until, start, run
+from arbecho import ARB, BCAST, Echo, HA, check, until, start, run, arb_sender, arb_listener, own_addr
 
 key = os.urandom(32)
 a, b = Echo("Echo Kitchen", 16981, 500, net=(2, key)), Echo("Echo Hall", 16982, 900, net=(2, key))
@@ -23,8 +23,7 @@ async def main():
     await start((a, b), ha)
     check(await until(lambda: a.st("arbitration_peers") == 1 and b.st("arbitration_peers") == 1, 10), "both in one network")
     a.page.set(arbitration_window_auto="off", arbitration_window=1000)
-    sn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)                 # listens in on the messages
-    sn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); sn.bind(("", ARB)); sn.setblocking(False)
+    sn = arb_listener()                 # listens in on the messages
     bpk, apk = b.pub()[:8], a.pub()[:8]
     msgs, beacons = [], []                          # (when, from "a"/"b", payload, to all); when the hall's beacons came
 
@@ -145,8 +144,7 @@ async def main():
     ctr = [1 << 40]
     def signed(p): return p + hashlib.blake2b(p, key=mac, digest_size=16).digest()
     def fctr(): ctr[0] += 1; return struct.pack("<Q", ctr[0])
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    send = lambda p: tx.sendto(p, (BCAST, ARB))
+    tx, send = arb_sender()
     h = os.urandom(32); name = b"echo-office"
     send(signed(b"HMA1\x01" + h + nb8 + bytes([len(name)]) + name + fctr())); await asyncio.sleep(0.5)
     def msg(payload): send(signed(b"HMA1\x07" + nb8 + h[:8] + b"\xff" * 8 + fctr() + bytes([len(payload)]) + payload))

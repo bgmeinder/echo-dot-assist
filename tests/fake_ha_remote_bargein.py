@@ -33,7 +33,7 @@ async def main():
     play = os.path.join(state, "play.raw")
     with open(os.path.join(state, "config"), "w") as f: f.write("request_text=on\n")
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw",
-               HASSMIC_PLAY=play, HASSMIC_ARB_ADDR="127.255.255.255",
+               HASSMIC_PLAY=play, HASSMIC_ARB_ADDR="ff02::114",
                HASSMIC_MODELS=os.path.join(state, "models"), HASSMIC_MDNS_FILE=os.path.join(state, "mdns"))
     proc = subprocess.Popen([f"{ROOT}/build/hassmic-host", "-P", "esphome", "-p", str(PORT), "-n", "Echo Dot", "-w", "remote"], env=env)
     httpd = ThreadingHTTPServer(("127.0.0.1", HTTP_PORT), Slow)

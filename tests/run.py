@@ -6,7 +6,7 @@
 The tests mostly wait (audio at real time, timers of hassmic's), so they overlap well beyond the CPUs.  Each one gets a
 loopback of its own (unshare -rn, then a user namespace again with the caller's uid, so files and permissions look as
 they do outside): the tests bind fixed ports, hassmic its defaults (28928-28932) and the arbitration beacons go to
-127.255.255.255, which would otherwise reach the Echos of every other test.  Logs in build/test-logs/<name>.log.
+ff02::114 on the namespace's own t0 (a dummy interface with a ULA), which would otherwise reach the Echos of every other test.  Logs in build/test-logs/<name>.log.
 Ubuntu 24.04 lets only programs with an AppArmor profile make user namespaces: sysctl
 kernel.apparmor_restrict_unprivileged_userns=0 (CI does).
 
@@ -124,7 +124,10 @@ def netns(argv, peer=False, name=""):
         import tempfile
         sys.path.insert(0, os.path.join(ROOT, "tests")); import peerhost
         pre = peerhost.shell(os.path.join(tempfile.mkdtemp(prefix="hassmic-peer."), "peer"), PY)
-    inner = ("ip link set lo multicast on up && ip route add 224.0.0.0/4 dev lo && " + pre + LO_ADDRS.get(name, "")
+    inner = ("ip link set lo multicast on up && ip route add 224.0.0.0/4 dev lo && "
+             # the Echos' own network: IPv6 multicast (arb.c's ff02::114) on an interface of its own with a ULA, as a
+             # home's fd00: one; loopback carries no IPv6 multicast
+             "ip link add t0 type dummy && ip link set t0 multicast on up && ip -6 addr add fd00:7e57::1/64 dev t0 nodad && " + pre + LO_ADDRS.get(name, "")
              + "exec unshare -U --map-user=%d --map-group=%d \"$@\"" % (os.getuid(), os.getgid()))
     return ["unshare", "-rn", "sh", "-c", inner, "sh", *argv]
 

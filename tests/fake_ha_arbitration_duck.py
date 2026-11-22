@@ -9,7 +9,7 @@ that both answer (down until both are done), and a Drop In invite sent to every 
 import asyncio, base64, hashlib, os, re, signal, socket, struct, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from aioesphomeapi import MediaPlayerInfo, VoiceAssistantEventType as Ev
-from arbecho import ARB, BCAST, Echo, HA, check, until, start, run
+from arbecho import ARB, BCAST, Echo, HA, check, until, start, run, arb_sender, arb_listener, own_addr
 from esphome_common import wav_bytes
 
 key = os.urandom(32)
@@ -37,8 +37,7 @@ async def main():
     await start((a, b, c), ha)
     ok = await until(lambda: all(e.st("arbitration_peers") == 2 for e in (a, b, c)), 10)
     check(ok, "three Echos in one network")
-    sn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)                 # listens in on the messages
-    sn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); sn.bind(("", ARB)); sn.setblocking(False)
+    sn = arb_listener()                 # listens in on the messages
     bpk = b.pub()[:8]
     msgs, to_all = [], []                           # (when, on): the living room Echo's duck messages; whether each went to all
 
@@ -141,8 +140,7 @@ async def main():
     ctr = [1 << 40]
     def signed(p): return p + hashlib.blake2b(p, key=mac, digest_size=16).digest()
     def fctr(): ctr[0] += 1; return struct.pack("<Q", ctr[0])
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    send = lambda p: tx.sendto(p, (BCAST, ARB))
+    tx, send = arb_sender()
     kw = hashlib.blake2b(b"alexa", digest_size=8).digest()          # the wake word heard (fake_ha_arbitration_window.py)
     h1, h2 = os.urandom(32), os.urandom(32)
     for k, name in ((h1, b"echo-hallway"), (h2, b"echo-office")): send(signed(b"HMA1\x01" + k + nb8 + bytes([len(name)]) + name + fctr()))

@@ -2,6 +2,7 @@
  * See arb.c. */
 #ifndef ARB_H
 #define ARB_H
+#include <netinet/in.h>
 #include <stddef.h>
 
 struct arb_hooks {
@@ -19,7 +20,7 @@ struct arb_hooks {
     /* A member's message for us (arb_tell), checked: K's MAC, a fresh counter.  from: its id (the first 8 bytes of its
      * public key), node and IP as its beacons say; all: addressed to every member (arb_tell(NULL)), not to us alone.
      * May be NULL.  Called from arb's thread, never with its lock held. */
-    void (*message)(const unsigned char from[8], const char *node, unsigned ip, const unsigned char *p, size_t n, int all);
+    void (*message)(const unsigned char from[8], const char *node, const struct in6_addr *ip, const unsigned char *p, size_t n, int all);
 };
 
 int  arb_start(int port, const char *node, const struct arb_hooks *h);           /* node: our ESPHome node name; 0 = running */
@@ -58,9 +59,10 @@ int  arb_pair(void);
  * member, duck.c), broadcast like everything else here, under K's MAC and our counter; -1 outside a network.  arb_derive: a key every member derives
  * from K for that purpose, nobody else; -1 outside a network.  arb_self: our own id.  Any lock but arb's. */
 #define ARB_MSG_MAX 160
-int  arb_member(const char *node, unsigned char id[8], unsigned *ip);
+int  arb_member(const char *node, unsigned char id[8], struct in6_addr *ip);
 /* how that member settles rounds, by its beacons: ARB_HASSMIC, ARB_KIOSK; -1 no member heard under that name */
 int  arb_member_mode(const char *node);
+unsigned arb_ifindex(void);                     /* the interface the Echos share (its link-local addresses need it); 0: none yet */
 int  arb_tell(const unsigned char to[8], const void *p, size_t n);
 int  arb_derive(const char *label, unsigned char out[32]);
 void arb_self(unsigned char id[8]);                            /* the pairing gesture: 2 min in which an Echo nearby may join; -1 not running */

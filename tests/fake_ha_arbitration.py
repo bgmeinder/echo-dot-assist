@@ -8,7 +8,7 @@ import asyncio, os, socket, struct
 from aioesphomeapi import APIClient
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from arbecho import ARB, BCAST, SCAN, POLL, ATTEST_WAIT, DISCOVER, Echo, HA, Browser, check, until, start, run
+from arbecho import ARB, BCAST, SCAN, POLL, ATTEST_WAIT, DISCOVER, Echo, HA, Browser, check, until, start, run, arb_sender, arb_listener, own_addr
 
 # each already in a network of its own (as two Echos that started at the same moment would be): they merge
 a, b = Echo("Echo Kitchen", 16961, 500, net=5), Echo("Echo Living Room", 16962, 900, net=2)
@@ -31,7 +31,7 @@ async def main():
     check("moved to the older network 0000000000000002 (key from echo-living-room, confirmed by Home Assistant)" in a.text()
           and not ha.calls and not ha.refused, "the key went on the LAN, sealed, after Home Assistant confirmed both: without any action")
     arb = a.page.state()["arbitration"]
-    check(arb["network"] == "0000000000000002" and [(m["node"], m["ip"]) for m in arb["members"]] == [("echo-living-room", "127.0.0.1")]
+    check(arb["network"] == "0000000000000002" and [(m["node"], m["ip"]) for m in arb["members"]] == [("echo-living-room", own_addr())]
           and arb["tag"] == "tag." + a.tag() and not arb["others"], f"settings page: the network, its member with its address, the tag: {arb}")
     n = len(ha.scans); await asyncio.sleep(SCAN * 1.5)
     check(len(ha.scans) == n, f"both in one network: no more scans ({len(ha.scans) - n} since)")
@@ -39,8 +39,7 @@ async def main():
 
     # a device Home Assistant does not know
     x = X25519PrivateKey.generate(); xp = x.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    send = lambda p: tx.sendto(p, (BCAST, ARB))
+    tx, send = arb_sender()
     node = lambda s: bytes([len(s)]) + s.encode()
     net = a.net(); calls = len(ha.calls)
     send(b"HMA1\x01" + xp + struct.pack("<Q", 0) + node("evil"))                      # outside any network: gets our key sent...

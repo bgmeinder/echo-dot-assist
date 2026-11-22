@@ -1,6 +1,7 @@
 /* Drop In: a two-way call between two Echos of one arbitration network (dropin.c). */
 #ifndef DROPIN_H
 #define DROPIN_H
+#include <netinet/in.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "call.h"
@@ -31,5 +32,5 @@ int  dropin_answer(void);                       /* the screen's Answer: a ringin
 int  dropin_status(char *peer, size_t cap);     /* DROPIN_*; peer: the other Echo's node ("" when idle) */
 int  dropin_last(unsigned *attempt);            /* the last call's DROPIN_R_* (-1: none yet); attempt counts calls made */
 /* arb's hook: a member's message (arb.h) */
-void dropin_message(const unsigned char from[8], const char *node, unsigned ip, const unsigned char *p, size_t n);
+void dropin_message(const unsigned char from[8], const char *node, const struct in6_addr *ip, const unsigned char *p, size_t n);
 #endif

@@ -75,7 +75,7 @@ class Echo:
         self.logpath = os.path.join(self.tmp, "log"); open(self.logpath, "w").close(); self.log = open(self.logpath, "a")
         env = dict(os.environ, HASSMIC_STATE=self.state, HASSMIC_FAKE_MIXER=self.mixer, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw",
                    HASSMIC_PLAY=os.path.join(self.tmp, "play.raw"), HASSMIC_MDNS_FILE=os.path.join(self.tmp, "mdns"),
-                   HASSMIC_FAKE_ADDRS=os.path.join(self.tmp, "addrs"), HASSMIC_ARB_ADDR="127.255.255.255",
+                   HASSMIC_FAKE_ADDRS=os.path.join(self.tmp, "addrs"), HASSMIC_ARB_ADDR="ff02::114",
                    HASSMIC_MODELS=os.path.join(self.tmp, "models"), HASSMIC_LED_ROOT=os.path.join(self.tmp, "etc"),
                    HASSMIC_FAKE_SPEAKER=self.speaker, HASSMIC_EARCONS=os.path.join(self.tmp, "earcons") + "/")
         with open(env["HASSMIC_FAKE_ADDRS"], "w") as f: f.write("127.0.0.1\n")

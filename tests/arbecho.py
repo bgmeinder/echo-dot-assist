@@ -7,7 +7,7 @@ scan's time), answers any device's request for a state (no permission needed), a
 Everything goes out as loopback broadcast (HASSMIC_ARB_ADDR): nothing of it reaches the LAN.  The network's own pace
 (beacons, discovery, tags, key handoff, pairing) runs at SCALE of the real one (HASSMIC_ARB_SCALE, arb.c PACE): at
 the real one a join by the action alone waits out half a minute.  Rounds and the window keep their real times."""
-import asyncio, base64, datetime, os, re, signal, subprocess, sys, tempfile, time
+import asyncio, base64, datetime, os, re, signal, socket, subprocess, sys, tempfile, time
 from aioesphomeapi import APIClient, VoiceAssistantEventType as Ev
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -16,7 +16,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 from webclient import wait_port, Browser
 from esphome_common import LEAD_IN
-ARB, KIOSK, BCAST = 28990, 28991, "127.255.255.255"          # KIOSK: stands in for Kiosk Satellite's 2330
+ARB, KIOSK, BCAST, GROUP = 28990, 28991, "127.255.255.255", "ff02::114"   # KIOSK: stands in for Kiosk Satellite's 2330 (IPv4 broadcast, the app's)
 SCALE = 0.1
 def pace(secs): return secs * SCALE                          # one of arb.c's PACE() times, in s here
 SCAN, POLL, ATTEST_WAIT, DISCOVER, BEACON_MAX = pace(10), pace(3), pace(30), pace(5), pace(40)
@@ -36,6 +36,42 @@ async def until(cond, secs):
     return cond()
 
 
+
+def arb_iface():
+    """the interface the Echos share, as arb.c picks it: the namespace's t0 under tests/run.py (a ULA on it), else the
+    first one that is not loopback (a container's eth0, when a test runs alone)"""
+    names = [n for _, n in socket.if_nameindex()]
+    return "t0" if "t0" in names else next(n for n in names if n != "lo")
+
+
+def own_addr():
+    """the address the Echos send from there: its ULA (fc00::/7), else its global one, as arb.c's arb_iface takes it"""
+    best, rank = None, 0
+    for l in open("/proc/net/if_inet6"):
+        h, _, _, scope, _, dev = l.split()
+        if dev != arb_iface(): continue
+        a = socket.inet_ntop(socket.AF_INET6, bytes.fromhex(h))
+        r = 3 if int(h[:2], 16) & 0xfe == 0xfc else 1 if scope == "20" else 2
+        if r > rank: best, rank = a, r
+    return best
+
+
+def arb_sender():
+    """a socket and a send(p) to the Echos' group, as a forger on the LAN would"""
+    tx = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM); idx = socket.if_nametoindex(arb_iface())
+    tx.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, idx)
+    return tx, lambda p: tx.sendto(p, (GROUP, ARB, 0, idx))
+
+
+def arb_listener():
+    """a socket that hears what the Echos send to their group (non-blocking)"""
+    import struct
+    sn = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    sn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); sn.bind(("::", ARB))
+    sn.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, socket.inet_pton(socket.AF_INET6, GROUP) + struct.pack("@I", socket.if_nametoindex(arb_iface())))
+    sn.setblocking(False)
+    return sn
+
 class Echo:
     def __init__(self, name, port, score, net=None):
         """net: the network id it starts in (state/arbitration as a join left it), with a fresh key unless given one"""
@@ -48,7 +84,7 @@ class Echo:
         self.env = dict(os.environ, HASSMIC_LOGIN_MS="60000:300",     # (browsers log in one after the other here: web.c keeps others back 0.3 s after a press, not 30)
                                     HASSMIC_STATE=self.state, HASSMIC_SETTINGS=os.path.join(self.state, "settings"),
                         HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw", HASSMIC_PLAY=os.path.join(self.state, "play.raw"),
-                        HASSMIC_MDNS_FILE=os.path.join(self.state, "none"), HASSMIC_ARB_ADDR=BCAST, HASSMIC_KIOSK_PORT=str(KIOSK),
+                        HASSMIC_MDNS_FILE=os.path.join(self.state, "none"), HASSMIC_ARB_ADDR=GROUP, HASSMIC_KIOSK_ADDR=BCAST, HASSMIC_KIOSK_PORT=str(KIOSK),
                         HASSMIC_TEST_SCORE=str(score), HASSMIC_MODELS=os.path.join(self.state, "models"), HASSMIC_ARB_SCALE=str(SCALE))
         os.makedirs(os.path.join(self.state, "models", "echo-de"))
         open(os.path.join(self.state, "models", "echo-de", "pryon.manifest"), "w").close()

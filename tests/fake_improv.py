@@ -574,7 +574,7 @@ def main():
     ctl = Controller(); keys = os.path.join(tmp, "keys"); os.mkfifo(keys)
     log = os.path.join(tmp, "log")
     env = dict(os.environ, HASSMIC_STATE=state, HASSMIC_WIFI=out, HASSMIC_CAP=f"{ROOT}/testdata/alexa_espeak.raw",
-               HASSMIC_PLAY=os.path.join(tmp, "play.raw"), HASSMIC_MDNS_FILE=os.path.join(tmp, "none"), HASSMIC_ARB_ADDR="127.255.255.255",
+               HASSMIC_PLAY=os.path.join(tmp, "play.raw"), HASSMIC_MDNS_FILE=os.path.join(tmp, "none"), HASSMIC_ARB_ADDR="ff02::114",
                HASSMIC_MODELS=os.path.join(tmp, "models"), HASSMIC_ADB_OPEN=os.path.join(tmp, "adb-open"), HASSMIC_LOG=log,
                HASSMIC_BT_DEV=ctl.path, HASSMIC_FAKE_ONLINE=online, HASSMIC_IMPROV_TIMES="1 1 4 3 3 18 2",       # (not set up, lost, the button's, provisioned; on a network 3 s: let go; not authorized and nothing from it for 18 s: let go; identify without the button once in 2 s)
                HASSMIC_LOGIN_MS="60000:300",                # (a login asked for right after a press here: web.c's quiet time 0.3 s)

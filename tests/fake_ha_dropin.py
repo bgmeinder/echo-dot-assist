@@ -15,7 +15,7 @@ from aioesphomeapi import APIClient, VoiceAssistantEventType as Ev
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 from webclient import wait_port, Browser
-ARB, BCAST = 28994, "127.255.255.255"
+ARB, BCAST = 28994, "ff02::114"                    # arbitration's group (arb.c)
 SPEECH = f"{ROOT}/testdata/alexa_espeak.raw"
 # a stand-in for stock's incoming ringtone (the PC has none, and plays no ring without it): 1 s of 440 Hz at 8000
 EARCONS = tempfile.mkdtemp()

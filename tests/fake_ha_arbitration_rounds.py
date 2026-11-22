@@ -4,7 +4,7 @@ both hear it (the claims on the wire, the decision, the audio from the wake word
 check, the Echo in a conversation, different wake words, arbitration switched off and on."""
 import asyncio, json, os, re, socket, time
 from aioesphomeapi import VoiceAssistantEventType as Ev
-from arbecho import ARB, LEAD_IN, Echo, HA, Browser, check, until, start, run
+from arbecho import ARB, LEAD_IN, Echo, HA, Browser, check, until, start, run, arb_sender, arb_listener, own_addr
 from webclient import req
 
 key = os.urandom(32)
@@ -39,8 +39,7 @@ async def main():
     check(zb.through(z, nonce=n) == "approved" and zb.through(z, nonce=n) == "refused", "a nonce counts once")
 
     # both hear it, the one that heard it better answers, the other stays quiet
-    sn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)                 # listens in on the claims
-    sn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); sn.bind(("", ARB)); sn.setblocking(False)
+    sn = arb_listener()                 # listens in on the claims
     await asyncio.sleep(1)
     while True:
         try: sn.recv(512)
