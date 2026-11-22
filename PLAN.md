@@ -6177,3 +6177,31 @@ Open, in this order:
       is not marked (a fault there names nobody)
 - [ ] the cut (5.9)
 
+
+## Fire OS polish — from the Linux port, 2026-11-22
+
+What the Echo Spot's plain-Linux work (branch `spot-linux`, its own line from now on) found that the Fire OS builds
+should take too. Each names where it was done there; none of it is here yet.
+
+- [ ] **The Spot's antenna fix** (Wi-Fi on one chain, Bluetooth on the other, the firmware's coexistence off): music
+      from a phone without dropouts on 2.4 GHz. The plan for this image: [devices/rook/antenna-fix-fireos.md](devices/rook/antenna-fix-fireos.md).
+- [ ] **Echo to Echo over IPv6, IPv4 kept** (spot-linux 46500ac, 03d12ec): arbitration's packets to `ff02::114` from the
+      Echo's ULA (IPV6_PKTINFO) and a copy to IPv4 broadcast; the receiver keeps the better address (ULA, global,
+      link-local, IPv4: `addr_take`); Drop In's socket dual-stack. Here arbitration and Drop In are IPv4 broadcast only,
+      so on an IPv6-only network Echos do not find each other. Lockdown's rules need `ff02::114` and the UDP ports in
+      for IPv6 as well.
+- [ ] **`.local` names AAAA first** (spot-linux `net.c` `mdns_resolve6`, then `mdns_resolve4`; `https.c` the same):
+      media from a Home Assistant named by mDNS on an IPv6-only network.
+- [ ] **Improv's settings-page URL with an IPv6 address in brackets** (spot-linux `improv.c`): a phone got a broken link
+      once the address was IPv6's.
+- [ ] **The Wi-Fi switch's "on the network" check, IPv6 first** (spot-linux `scripts/device/wifi.sh` `online6`): an IPv6
+      address and its router answering count before IPv4's lease; status shows the IPv6 address. Here a network
+      without IPv4 DHCP is taken for "no address" and the switch goes back.
+- [ ] **Tests that check plumbing, not defaults**: `tests/fake_ha_esphome_timers.py` asserts "manual at 47 % by default";
+      set a level on the page and see it arrive instead (as spot-linux's does, down to the backlight file). The same
+      for any other test that pins a model's default.
+- [ ] **The light ring designs test** (`tests/fake_web_ring.py`): spot-linux split what is the Dots' ledcontroller from
+      what every ring shares; keep the Dots' part here, but the shared checks would serve a band model too.
+- [ ] **Flaky tests**: arbitration, esphome-timers and screen-9 sometimes pass only on a rerun (seen on both lines).
+- [ ] **The screen's pull-down settings on the Spot** (spot-linux `src/hassmic/panel.c`, `ringfb.c`): Fire OS's Spot has
+      only the web page; the page model is generic, a ringbar.dex renderer could draw it. Nice to have.
