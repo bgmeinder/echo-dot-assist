@@ -17,4 +17,9 @@ unsigned mdns_resolve4(const char *name);
  * keeps it with the network gone); getifaddrs failing counts as online.  HASSMIC_FAKE_ONLINE (tests): a file, online
  * while it exists.  improv.c's look at the network, and plugin_fetch.c's before it asks the plugin index */
 int net_online(void);
+
+/* The IPv6 address of a ".local" name by a one-shot mDNS query (RFC 6762 5.1): a ULA if it has one, else global, else
+ * link-local with its interface; 0, or -1 if nobody answered. */
+struct sockaddr_in6;
+int mdns_resolve6(const char *name, struct sockaddr_in6 *out);
 #endif

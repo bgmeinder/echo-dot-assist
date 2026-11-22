@@ -247,7 +247,7 @@ static void *run(void *arg)
  * resolver nor this libcurl asks mDNS.  The certificate is still checked against the name. */
 static struct curl_slist *resolve_local(const char *url)
 {
-    char host[256], entry[300], ip[INET_ADDRSTRLEN]; const char *p = url + 8, *end = p + strcspn(p, "/?#"), *colon;
+    char host[256], entry[360], ip[INET6_ADDRSTRLEN]; const char *p = url + 8, *end = p + strcspn(p, "/?#"), *colon;
     const char *at = memchr(p, '@', (size_t)(end - p));
     if (at) p = at + 1;
     if (*p == '[') return NULL;                         /* an IPv6 address */
@@ -255,9 +255,10 @@ static struct curl_slist *resolve_local(const char *url)
     size_t hl = (size_t)((colon ? colon : end) - p);
     if (hl < 7 || hl >= sizeof host || strncasecmp(p + hl - 6, ".local", 6)) return NULL;
     memcpy(host, p, hl); host[hl] = 0;
-    unsigned a = mdns_resolve4(host);
-    if (!a || !inet_ntop(AF_INET, &a, ip, sizeof ip)) return NULL;     /* curl tries DNS: some servers serve .local */
-    snprintf(entry, sizeof entry, "%s:%.*s:%s", host, colon ? (int)(end - colon - 1) : 3, colon ? colon + 1 : "443", ip);
+    struct sockaddr_in6 a;
+    if (mdns_resolve6(host, &a) || IN6_IS_ADDR_LINKLOCAL(&a.sin6_addr)                 /* (curl's list takes no scope) */
+        || !inet_ntop(AF_INET6, &a.sin6_addr, ip, sizeof ip)) return NULL;          /* curl tries DNS: some servers serve .local */
+    snprintf(entry, sizeof entry, "%s:%.*s:[%s]", host, colon ? (int)(end - colon - 1) : 3, colon ? colon + 1 : "443", ip);
     return curl->slist_append(NULL, entry);
 }
 
