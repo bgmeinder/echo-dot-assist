@@ -4632,6 +4632,11 @@ int main(int argc, char **argv)
       if (!settings_peek("clock_face", v, sizeof v)) for (int i = 0; i < n; i++) if (!strcmp(v, faces[i])) ring_band_face(i);
       if (!settings_peek("round_clock", v, sizeof v)) ring_band_clock(!strcmp(v, "24h") ? 1 : !strcmp(v, "12h") ? 2 : 0); }
     ring_start(led_run, ring_reloaded);
+    /* the light sensor's first reading before any thread that asks for it: the first core_lux() reads the sensor itself
+     * (~800 ms on the Spot's OPT3001) and every other caller waits for it, settings_load under core_lock among them,
+     * and the capture thread behind that lock (2026-11-23: "380 ms of the mic lost" at every start; sampled, the band
+     * thread in opt3001_get_lux).  Here nothing waits: the capture is not open yet */
+    core_lux();
     ringlive_start(live_hold, live_level, live_changed);     /* where root gave hassmic the ring's frame (main.sh) */
     term_start();                       /* (after ringlive_start: its SIGTERM handler is the one before ours) */
     rd_start();                         /* designs asked for before this start: still installing, or back */
