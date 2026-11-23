@@ -2,6 +2,7 @@
 #define _GNU_SOURCE                     /* getresgid on glibc */
 #endif
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netdb.h>
@@ -110,6 +111,62 @@ static int parse_answer(const uint8_t *m, size_t len, const char *name, struct i
     return best;
 }
 
+/* The querier's port: random in the firewall's inbound range 16384-32767 (the unicast answers come back from another
+ * address than the multicast group asked, so conntrack does not admit them), so that nobody off the link can aim at it. */
+static int bind_random(int s, struct sockaddr *me, socklen_t ml, in_port_t *port)
+{
+    uint16_t rnd[20]; int f = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    int ok = f >= 0 && read(f, rnd, sizeof rnd) == (ssize_t)sizeof rnd;
+    if (f >= 0) close(f);
+    if (!ok) return -1;
+    for (int i = 0; i < 20; i++) {
+        *port = htons(16384 + rnd[i] % 16384);
+        if (!bind(s, me, ml)) return 0;
+    }
+    return -1;
+}
+
+/* an IPv4 address inside the subnet of one of this Echo's own interfaces (not loopback) */
+static int in_own_subnet(in_addr_t a)
+{
+    struct ifaddrs *ifs, *i; int in = 0;
+    if (getifaddrs(&ifs)) return 0;
+    for (i = ifs; i && !in; i = i->ifa_next)
+        if (i->ifa_addr && i->ifa_netmask && i->ifa_addr->sa_family == AF_INET && !(i->ifa_flags & IFF_LOOPBACK)) {
+            in_addr_t me = ((struct sockaddr_in *)i->ifa_addr)->sin_addr.s_addr;
+            in_addr_t m = ((struct sockaddr_in *)i->ifa_netmask)->sin_addr.s_addr;
+            in = m && (a & m) == (me & m);
+        }
+    freeifaddrs(ifs);
+    return in;
+}
+
+/* One datagram into r; 0 unless it came from the link: RFC 6762 11, a responder sends with hop limit / TTL 255, and
+ * every router on the way takes one off, so an answer forged from afar arrives with less (and is dropped here). */
+static ssize_t recv_onlink(int s, int v6, uint8_t *r, size_t cap, struct sockaddr *from, socklen_t fl)
+{
+    union { struct cmsghdr h; char b[CMSG_SPACE(sizeof(int)) * 4]; } ctl;
+    struct iovec iov = { r, cap };
+    struct msghdr mh = { .msg_name = from, .msg_namelen = fl, .msg_iov = &iov, .msg_iovlen = 1,
+                         .msg_control = ctl.b, .msg_controllen = sizeof ctl.b };
+    ssize_t n = recvmsg(s, &mh, 0); int hops = -1;
+    if (n <= 0) return n;
+    for (struct cmsghdr *c = CMSG_FIRSTHDR(&mh); c; c = CMSG_NXTHDR(&mh, c)) {
+        if (v6 && c->cmsg_level == IPPROTO_IPV6 && c->cmsg_type == IPV6_HOPLIMIT && c->cmsg_len >= CMSG_LEN(sizeof(int)))
+            memcpy(&hops, CMSG_DATA(c), sizeof hops);
+        else if (!v6 && c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_TTL && c->cmsg_len >= CMSG_LEN(sizeof(int)))
+            memcpy(&hops, CMSG_DATA(c), sizeof hops);
+    }
+    if (hops == 255) return n;
+    /* Responders that answer a unicast question with the system's default (64; this project's own mdnsd did until
+     * 2026-11-23): taken when the sender is on the link all the same, IPv6 from a link-local address (no router
+     * forwards one), IPv4 from inside a subnet of this Echo's own */
+    if (v6 && IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *)from)->sin6_addr)) return n;
+    if (!v6 && in_own_subnet(((struct sockaddr_in *)from)->sin_addr.s_addr)) return n;
+    fprintf(stderr, "mdns: an answer with hop limit %d, not from this link: ignored\n", hops);
+    return 0;
+}
+
 /* Sent from a port other than 5353, so responders answer by unicast to it (RFC 6762 5.1, 6.7) and the responder that
  * owns 5353 on the Echo (mdnsd) is not in the way.  IPv6 first: an AAAA question to ff02::fb on every interface that
  * can carry it (multicast has no route to follow); of the answers, a ULA before a global address before a link-local
@@ -129,11 +186,9 @@ int mdns_resolve6(const char *host, struct sockaddr_in6 *out)
     int s = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0), bound = 0, on = 1;
     if (s < 0) return -1;
     setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof on);
+    setsockopt(s, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &on, sizeof on);
     struct sockaddr_in6 me; memset(&me, 0, sizeof me); me.sin6_family = AF_INET6;
-    for (int i = 0; i < 20 && !bound; i++) {
-        me.sin6_port = htons(16384 + ((unsigned)getpid() * 7919u + i * 104729u) % 16384);
-        bound = !bind(s, (struct sockaddr *)&me, sizeof me);
-    }
+    bound = !bind_random(s, (struct sockaddr *)&me, sizeof me, &me.sin6_port);
     if (!bound) { close(s); return -1; }
     int hops = 255; setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof hops);
     struct sockaddr_in6 to; memset(&to, 0, sizeof to); to.sin6_family = AF_INET6; to.sin6_port = htons(5353);
@@ -158,8 +213,8 @@ int mdns_resolve6(const char *host, struct sockaddr_in6 *out)
         if (!nd) break;                                 /* no interface with IPv6: nobody to ask (IPv4 next, at once) */
         struct pollfd pfd = { .fd = s, .events = POLLIN };
         while (!got && poll(&pfd, 1, wait_ms[round]) > 0) {
-            struct sockaddr_in6 from; socklen_t fl = sizeof from;
-            ssize_t n = recvfrom(s, r, sizeof r, 0, (struct sockaddr *)&from, &fl);
+            struct sockaddr_in6 from; memset(&from, 0, sizeof from);
+            ssize_t n = recv_onlink(s, 1, r, sizeof r, (struct sockaddr *)&from, sizeof from);
             struct in6_addr a;
             if (n > 0 && parse_answer(r, (size_t)n, name, &a)) {
                 memset(out, 0, sizeof *out); out->sin6_family = AF_INET6; out->sin6_addr = a;
@@ -202,14 +257,11 @@ unsigned mdns_resolve4(const char *host)
     size_t qlen = 12 + l;
     q[qlen++] = 0; q[qlen++] = 1;                                               /* type A */
     q[qlen++] = 0x80; q[qlen++] = 1;                                            /* class IN, unicast response wanted */
-    int s = socket(AF_INET, SOCK_DGRAM, 0), bound = 0;
+    int s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0), on = 1;
     if (s < 0) return 0;
+    setsockopt(s, IPPROTO_IP, IP_RECVTTL, &on, sizeof on);
     struct sockaddr_in me = { .sin_family = AF_INET };
-    for (int i = 0; i < 20 && !bound; i++) {
-        me.sin_port = htons(16384 + ((unsigned)getpid() * 7919u + i * 104729u) % 16384);
-        bound = !bind(s, (struct sockaddr *)&me, sizeof me);
-    }
-    if (!bound) { close(s); return 0; }
+    if (bind_random(s, (struct sockaddr *)&me, sizeof me, &me.sin_port)) { close(s); return 0; }
     unsigned char ttl = 255; setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
     struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons(5353) };
     inet_pton(AF_INET, "224.0.0.251", &to.sin_addr);
@@ -229,7 +281,8 @@ unsigned mdns_resolve4(const char *host)
         if (!sent) sendto(s, q, qlen, 0, (struct sockaddr *)&to, sizeof to);
         struct pollfd pfd = { .fd = s, .events = POLLIN };
         while (!addr && poll(&pfd, 1, wait_ms[round]) > 0) {
-            ssize_t n = recv(s, r, sizeof r, 0);
+            struct sockaddr_in from;
+            ssize_t n = recv_onlink(s, 0, r, sizeof r, (struct sockaddr *)&from, sizeof from);
             if (n > 0) addr = parse_a(r, n, name);
         }
     }

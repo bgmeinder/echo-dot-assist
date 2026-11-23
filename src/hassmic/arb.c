@@ -79,7 +79,9 @@
  *   perform Home Assistant actions" on the member (HA raises a repair without it).
  *   Pairing (no Home Assistant at all): Volume up + Volume down held on both Echos.  For 2 min each broadcasts a pair
  *   request; a member hands K (T_GIVE) PAIR_SETTLE_MS after its own press, and only if exactly one Echo outside its
- *   network asked since 2 min before that press, and no Echo of an older network is pairing (that one gives).  Taking
+ *   network asked since 2 min before that press, and no Echo of an older network is pairing (that one gives).  The
+ *   Echo that asks likewise takes a key only if one Echo alone hands one: it holds the first PAIR_HOLD_MS, and a
+ *   second giver ends the pairing with neither (anyone can answer a request, first, with a network of its own).  Taking
  *   a key, by any way, ends the window.  An attacker who asks too only blocks it; one who asks alone gets K only if
  *   the owner pressed the member without pressing the newcomer first, or (one who keeps asking) pressed an Echo that
  *   is alone in a network of its own: that one hands over its own lone K, and can be silenced until it joins another.
@@ -217,6 +219,9 @@ static long long pace = 1000;                          /* per mille */
                                     * repair in HA for every owner who did not allow it */
 #define PAIR_MS PACE(120000)        /* the pairing gesture's window, and how far back a member looks for requests */
 #define PAIR_SETTLE_MS PACE(2000)   /* a member waits this long after its press for a second requester */
+#define PAIR_HOLD_MS PACE(10000)    /* and the Echo that asks holds the first key it is handed this long, for a second giver
+                                     * (pair_offer): the owner presses the member after it, and the member waits
+                                     * PAIR_SETTLE_MS more */
 #define NPEER  16
 #define NCLAIM 16
 #define NLEN   64
@@ -276,6 +281,10 @@ static long long ha_since;
 static struct preq { uint8_t pub[32]; char node[NLEN]; uint64_t net; long long seen; } preqs[NPEER];   /* pair requests heard */
 static long long pair_at, pair_until, pair_sent, give_at;
 static int pair_gave, give_left;
+/* pairing, the Echo that asks: the first key handed to it (offer, for network offer_net, since offer_at; 0: none) */
+static uint8_t offer[BLOB];
+static uint64_t offer_net;
+static long long offer_at;
 static atomic_int pair_event;
 static uint8_t give_pkt[5 + 32 + 8 + BLOB];
 /* open: claims are sampled for the window (until MEASURE_MS); got: members sampled in it, slot: where in delays[], when:
@@ -544,8 +553,12 @@ static void get_node(struct rd *r, char out[NLEN])
 /* An Echo's address.  Its packets come both ways, each as an IPv6 copy and an IPv4 one, and either may be the first
  * (the second is a replay, dropped): the better address is kept whichever came, a ULA before a global address before
  * a link-local one, IPv4 last; a worse one only once the better has not been heard for ADDR_STALE_MS (the Echo moved
- * to a network without it).  Only from packets that passed the network's tag */
+ * to a network without it).  Only from packets that passed the network's tag, and of those only from a fresh one
+ * (fresh()) or the other copy of the last fresh one: its counter, within ADDR_COPY_MS of it (peer_addr).  A recorded
+ * packet replayed later, from anywhere (an attacker's ULA ranks first), never moves an Echo's address, nor Drop In's
+ * audio with it */
 #define ADDR_STALE_MS 60000
+#define ADDR_COPY_MS  1000          /* the IPv4 and IPv6 copies of one packet come within this of each other */
 static int addr_rank(const struct in6_addr *a)
 {
     if (IN6_IS_ADDR_UNSPECIFIED(a)) return 0;
@@ -556,11 +569,15 @@ static void addr_take(struct in6_addr *have, long long *at, const struct in6_add
 {
     if (addr_rank(ip) >= addr_rank(have) || now - *at > ADDR_STALE_MS) { *have = *ip; *at = now; }
 }
-/* a known peer's address from an authenticated packet, fresh or a copy (lk held) */
-static void peer_addr(const uint8_t id[8], const struct in6_addr *ip, long long now)
+/* A known peer's address from an authenticated packet with counter c: f, it was fresh (fresh() just took c), or the
+ * other copy of the last fresh one, c again within ADDR_COPY_MS (lk held).  Anything else is a replay: not followed */
+static void peer_addr(const uint8_t id[8], uint64_t c, int f, const struct in6_addr *ip, long long now)
 {
     for (int i = 0; i < NPEER; i++)
-        if (peers[i].seen && !memcmp(peers[i].id, id, 8)) { addr_take(&peers[i].ip, &peers[i].ip_at, ip, now); return; }
+        if (peers[i].seen && !memcmp(peers[i].id, id, 8)) {
+            if (f || (c == peers[i].ctr && now - peers[i].seen <= ADDR_COPY_MS)) addr_take(&peers[i].ip, &peers[i].ip_at, ip, now);
+            return;
+        }
 }
 
 static struct peer *peer(const uint8_t id[8])
@@ -805,24 +822,57 @@ static int seal(uint8_t blob[BLOB], const uint8_t to[32])
     return 0;
 }
 
-/* A sealed K for network id: 1 if it opened and we took it.  from: where it came from, for the log */
-static int take_key(uint64_t id, const uint8_t blob[BLOB], const char *from)
+/* A sealed K for network id, opened into k: 0 if it opened and we would take it (else said why).  from: where it came
+ * from, for the log */
+static int key_open(uint8_t k[32], uint64_t id, const uint8_t blob[BLOB], const char *from)
 {
-    uint8_t k[32], wrap[32]; int ok = 0;
+    uint8_t wrap[32]; int bad = 1;
     if (!running) fprintf(stderr, "arbitration: key %s ignored (not running)\n", from);
     else if (in_net && id >= net_id)
         fprintf(stderr, "arbitration: key for network %016llx ignored (%s)\n", (unsigned long long)id, id == net_id ? "already in it" : "ours is older");
     else if (!memcmp(blob, pk, 32) || wrap_key(wrap, blob, blob, pk, id)
              || crypto_aead_unlock(k, blob + 56, wrap, blob + 32, blob, 32, blob + 72, 32))
         fprintf(stderr, "arbitration: key %s does not open with ours, ignored\n", from);
-    else {
+    else bad = 0;
+    crypto_wipe(wrap, sizeof wrap);
+    return bad;
+}
+
+/* A sealed K for network id: 1 if it opened and we took it.  from: where it came from, for the log */
+static int take_key(uint64_t id, const uint8_t blob[BLOB], const char *from)
+{
+    uint8_t k[32]; int ok = 0;
+    if (!key_open(k, id, blob, from)) {
         adopt(k, id, in_net ? "moved to the older" : "joined", from); ok = 1;
         /* in, whichever way: the gesture is done.  Left running, an Echo that just joined would be a member pairing,
          * and hand K to whoever asked during its window (a forger's request, recorded while it was the one asking) */
         if (pair_until) { pair_until = 0; atomic_store(&pair_event, 2); }
     }
-    crypto_wipe(k, sizeof k); crypto_wipe(wrap, sizeof wrap);
+    crypto_wipe(k, sizeof k);
     return ok;
+}
+
+static void offer_clear(void) { crypto_wipe(offer, sizeof offer); offer_net = 0; offer_at = 0; }
+
+/* Pairing, the Echo that asks: a key handed to it (lk held).  Anyone on the LAN hears its request and can answer first
+ * with a network of its own, so, as a member does with requests (only one Echo may ask), it takes a key only if one
+ * Echo alone hands one: the first is held PAIR_HOLD_MS, and a second giver (another Echo's key, or another network)
+ * ends the pairing with neither.  The copies of one "give" (three, each over IPv6 and IPv4) are the same giver */
+static void pair_offer(uint64_t id, const uint8_t blob[BLOB], long long now)
+{
+    uint8_t k[32]; int bad = key_open(k, id, blob, "from pairing");
+    crypto_wipe(k, sizeof k);
+    if (bad) return;
+    if (!offer_at) {
+        memcpy(offer, blob, BLOB); offer_net = id; offer_at = now;
+        fprintf(stderr, "arbitration: pairing: network %016llx handed to us, taken in %d s if no other Echo hands one\n",
+                (unsigned long long)id, (int)((PAIR_HOLD_MS + 999) / 1000));
+        return;
+    }
+    if (offer_net == id && !memcmp(offer, blob, 32)) return;       /* the same Echo's again */
+    fprintf(stderr, "arbitration: pairing refused: 2 Echos handed a network at once (%016llx and %016llx), joining neither\n",
+            (unsigned long long)offer_net, (unsigned long long)id);
+    offer_clear(); pair_until = 0; atomic_store(&pair_event, -1);
 }
 
 /* Hand K to an Echo outside our network, or in a younger one: on the LAN once HA confirmed its tag (it takes it once HA
@@ -879,9 +929,9 @@ static void on_packet(const uint8_t *p, size_t n, long long now, const struct in
             /* one we did not count yet (it just joined, or we did), or one that just started and counts nobody (F_HELLO):
              * answer, or it would not count us until our next beacon.  Not rate limited: only a holder of K gets here, once
              * per fresh counter */
-            peer_addr(pub, ip, now);                    /* (the other copy of a beacon: its address, nothing else) */
             int f = fresh(pub, c, now);
-            if (f) { struct peer *pp = peer(pub); snprintf(pp->node, NLEN, "%s", nd); addr_take(&pp->ip, &pp->ip_at, ip, now); pp->quiet = flags & F_QUIET; pp->kiosk = !!(flags & F_KIOSK); }
+            peer_addr(pub, c, f, ip, now);              /* (the other copy of a beacon: its address, nothing else) */
+            if (f) { struct peer *pp = peer(pub); snprintf(pp->node, NLEN, "%s", nd); pp->quiet = flags & F_QUIET; pp->kiosk = !!(flags & F_KIOSK); }
             if (f && (!known || (flags & F_HELLO))) beacon(1);
             return;
         }
@@ -910,7 +960,7 @@ static void on_packet(const uint8_t *p, size_t n, long long now, const struct in
     case T_GIVE: {      /* a recorded one replayed in a later pairing can only put us back into the network we were handed */
         const uint8_t *to = take(&r, 32); uint64_t net = get64(&r); const uint8_t *blob = take(&r, BLOB);
         if (r.bad || r.p != r.end || memcmp(to, pk, 32)) return;
-        if (pair_until && now < pair_until) { take_key(net, blob, "from pairing"); return; }
+        if (pair_until && (now < pair_until || offer_at)) { pair_offer(net, blob, now); return; }
         /* outside pairing only from an Echo HA confirmed, for the network it beacons */
         for (int i = 0; i < NPEER; i++) {
             struct cand *c = &cands[i];
@@ -927,8 +977,9 @@ static void on_packet(const uint8_t *p, size_t n, long long now, const struct in
         const uint8_t *l = take(&r, 1), *q = l ? take(&r, *l) : NULL;
         if (r.bad || r.end - r.p != 16 || !in_net || net != net_id || (memcmp(to, pk, 8) && memcmp(to, to_all, 8)) || !memcmp(from, pk, 8) || *l > ARB_MSG_MAX
             || !tag_ok(p, n)) return;
-        peer_addr(from, ip, now);
-        if (!fresh(from, c, now) || nmsg == (int)(sizeof msgs / sizeof msgs[0])) return;
+        int f = fresh(from, c, now);
+        peer_addr(from, c, f, ip, now);
+        if (!f || nmsg == (int)(sizeof msgs / sizeof msgs[0])) return;
         struct msg *m = &msgs[nmsg++]; struct peer *pp = peer(from);
         memcpy(m->from, from, 8); memcpy(m->p, q, *l); m->n = *l; m->all = !memcmp(to, to_all, 8);
         snprintf(m->node, NLEN, "%s", pp->node);
@@ -1222,7 +1273,15 @@ static void *loop(void *arg)
                 if (!c->attested && ago(c->seen, now, PEER_TTL_MS) && (give || get) && !ago(c->polled, now, POLL_MS)) { c->polled = now; poll_tag(c->pub); }
             }
         }
-        if (pair_until && now >= pair_until) {
+        /* the key handed to us in pairing, held long enough with no other giver: taken (the window waits for it) */
+        if (offer_at && pair_until && now - offer_at >= PAIR_HOLD_MS) {
+            uint8_t blob[BLOB]; uint64_t id = offer_net;
+            memcpy(blob, offer, BLOB); offer_clear();
+            take_key(id, blob, "from pairing");
+            crypto_wipe(blob, sizeof blob);
+        }
+        if (offer_at && !pair_until) offer_clear();     /* pairing ended another way (a refusal, a key from HA) */
+        if (pair_until && now >= pair_until && !offer_at) {
             pair_until = 0;
             if (!pair_gave) { fprintf(stderr, "arbitration: pairing ended, no Echo to pair with\n"); atomic_store(&pair_event, -1); }
         }
@@ -1326,7 +1385,7 @@ int arb_pair(void)
     long long now = now_ms();
     pthread_mutex_lock(&lk);
     if (!running) { pthread_mutex_unlock(&lk); return -1; }
-    pair_at = now; pair_until = now + PAIR_MS; pair_sent = 0; pair_gave = 0;
+    pair_at = now; pair_until = now + PAIR_MS; pair_sent = 0; pair_gave = 0; offer_clear();
     fprintf(stderr, "arbitration: pairing for %d s (%s)\n", (int)(PAIR_MS / 1000), in_net ? "a member: hands its network to the one Echo that asks"
                                                                                     : "looking for a member to take a network from");
     atomic_store(&pair_event, 1);
