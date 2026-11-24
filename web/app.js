@@ -668,7 +668,8 @@ async function answerVouch() {
   let q; try { q = JSON.parse(decodeURIComponent(m[1])); } catch (e) { return; }
   const host = (() => { try { return new URL(q.origin).hostname; } catch (e) { return ''; } })();
   const members = (state.arbitration && state.arbitration.members) || [];
-  let ok = members.some((x) => x.ip === host);
+  // (a URL's IPv6 host is in brackets; an Echo asking from its HTTPS address is known by that)
+  let ok = members.some((x) => x.ip === host.replace(/^\[|\]$/g, '') || baseOf(x.ip) === q.origin);
   if (ok) { try { ok = (await (await fetch(q.origin + '/api/hello')).json()).pub === q.target; } catch (e) { ok = false; } }
   const box = h('div', { class: 'callout ' + (ok ? 'info' : 'bad') }, icon(ok ? 'key' : 'warn'));
   $('vouch').append(box);                         // not #attention: that one is redrawn at every refresh, and this waits for an answer
@@ -2249,7 +2250,25 @@ const others = new Map();                // base URL -> { echo, hello, logged, d
 // The port the Echos' pages are on: this one's, as it says it (all Echos run it on the same one).  Not the page's URL:
 // behind a reverse proxy that is 80 or 443, and the other Echos were asked there (forum #171)
 const echoPort = () => (echo && echo.hello.port) || location.port || 80;
-const baseOf = (ip) => ip.includes(':') ? `http://${ip}` : `http://${ip}:${echoPort()}`;   // host:port when added so
+// An IPv6 address as beacons give it (no brackets, more than one colon): in a URL it goes in brackets.  Until
+// 2026-11-23 any colon was taken for "host:port" as added by hand, and http://fd00:...: was no URL at all
+const isV6 = (a) => /^[0-9a-f:.]+$/i.test(a) && a.split(':').length > 2;
+const hostOf = (ip) => isV6(ip) ? `[${ip}]` : ip;
+// The other Echos' HTTPS addresses, by their network address: each Echo's page tells it where it was opened (reportUrl),
+// the Echos pass that on (hello "urls", web.c).  Used only from a page opened over HTTPS, which may call nothing else
+const urlsNow = () => (state && state.device && state.device.urls) || (echo && echo.hello.urls) || {};
+const httpsOf = (ip) => { const u = location.protocol === 'https:' && urlsNow()[ip]; return u && u.startsWith('https://') ? u : null; };
+// host:port when added by hand so, [v6]:port too
+const baseOf = (ip) => httpsOf(ip) || (isV6(ip) ? `http://[${ip}]:${echoPort()}` : ip.includes(':') ? `http://${ip}` : `http://${ip}:${echoPort()}`);
+// This page opened at an HTTPS name (a reverse proxy's): the Echo is told, once, and whenever the name is another
+let urlTold = null;
+async function reportUrl() {
+  const host = location.hostname;
+  if (location.protocol !== 'https:' || !/[a-z]/i.test(host) || host.includes(':') || !echo) return;
+  if (echo.hello.url === location.origin || urlTold === location.origin) return;
+  urlTold = location.origin;
+  try { echo.hello.url = (await echo.call('POST', '/api/url', location.origin)).json().url; } catch (e) { /* an older hassmic, or not written: the next page load tries again */ }
+}
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 const nameList = (l) => l.length <= 2 ? l.join(' and ') : `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
 let netHead, netWarn, devBox, syncBox, modelBox;
@@ -2346,6 +2365,7 @@ function refreshDevices() {
 // All Echos at once, each shown as soon as it answers: one at a time, a single dead address held the whole list back
 async function scanDevices() {
   lastRound = Date.now();
+  reportUrl();
   ({ values: mine, ring: myRing } = await valuesOf(echo));
   try { myArts = (await echo.call('GET', '/api/artifacts')).json(); } catch (e) { /* the last list stands: one lost answer must not take the models off the page */ }
   const ips = knownIps(), jobs = [];
@@ -2354,6 +2374,8 @@ async function scanDevices() {
   for (const [base, d] of others) if (!ips.has(d.ip)) others.delete(base);     // moved, or added by hand and removed
   for (const ip of ips) {
     const base = baseOf(ip);
+    // (one entry an Echo: its base changes when its HTTPS address becomes known, or is no longer)
+    for (const [b, d] of others) if (d.ip === ip && b !== base) others.delete(b);
     if (base === location.origin || selfAt.has(base)) continue;
     if (!others.has(base)) others.set(base, { ip });
     jobs.push(probe(base).finally(() => { renderDevices(); renderAttention(); }));     // (the other Echos' notes of copied plugins: on every page that polls them)
@@ -2397,7 +2419,11 @@ async function probe(base) {
   } catch (e) {
     // a page opened over HTTPS (a proxy) may not call plain HTTP, and the Echos speak nothing else (mixed content)
     d.error = location.protocol === 'https:' ? 'Not reachable over HTTPS' : 'Not reachable';
-    d.hint = location.protocol === 'https:' ? `The browser blocks calls from an HTTPS page to plain HTTP: open this page at http://${(state.wifi && state.wifi.ip) || '<this Echo\'s IP>'}:${echoPort()} for the other Echos` : null;
+    // (an Echo that knows its own HTTPS address is called there, baseOf: the hint is for one that does not yet, or
+    // whose address does not answer)
+    d.hint = location.protocol !== 'https:' ? null : base.startsWith('https://')
+      ? `It did not answer at ${base}, the HTTPS address it gave: is that name still served?`
+      : `The browser blocks calls from an HTTPS page to plain HTTP. Open that Echo's own page once at its HTTPS address (as this one is at ${location.origin}): it then tells the others, and shows here within a minute or two. Or open this page at http://${hostOf((state.wifi && state.wifi.ip) || '<this Echo\'s IP>')}:${echoPort()}`;
   }
   finally { d.looking = false; }
 }
@@ -2433,7 +2459,7 @@ const echoName = (d) => (d.echo ? d.echo.hello.name : d.ip);
 const noOthers = (where) => (state.arbitration ? `Echos running hassmic on the same network show up by themselves within a minute; one on another subnet you add ${where}.`
   : `This Echo is not in the Echo network, so other Echos do not show up by themselves: add them by address ${where}.`);
 const ready = () => [...others.values()].filter((d) => d.echo && d.logged && !d.error).sort((a, b) => a.echo.hello.name.localeCompare(b.echo.hello.name));
-const shortAddr = (base) => base.replace('http://', '').replace(`:${echoPort()}`, '');
+const shortAddr = (base) => base.replace(/^https?:\/\//, '').replace(`:${echoPort()}`, '');
 
 function renderDevices() { drawSwitcher(); if (devBox) keepFocus(devBox, drawDevices); }
 function drawDevices() {
@@ -3551,7 +3577,7 @@ function wifiDialog() {
     const again = h('button', { type: 'button', onclick: () => { pickView(); scan(); } }, 'Try again');
     const done = h('button', { type: 'button', class: 'primary', onclick: () => dlg.close() }, 'Close');
     if (kind === 'ok') {
-      const moved = r.ip && r.ip !== location.hostname, url = `http://${r.ip}:${echoPort()}/`;
+      const moved = r.ip && hostOf(r.ip) !== location.hostname, url = `http://${hostOf(r.ip)}:${echoPort()}/`;
       title.textContent = `On ${r.ssid || net.ssid}`;
       body.replaceChildren(callout('ok', h('p', {}, `The Echo is on ${r.ssid || net.ssid} now, at ${r.ip || 'a new address'}.`),
         moved ? h('p', {}, h('a', { href: url }, 'Open its settings page there'), act(' (the action button approves this browser there once more).')) : null,

@@ -324,6 +324,20 @@ async def main():
         b.call("POST", "/api/note", "Küche".encode() + b"\xc3")
         check(hello()["note"] == "Küche", "a body that ends inside a character: that character left out")
         b.call("POST", "/api/note", "Wohnzimmer, Regal".encode())
+        # the page's HTTPS address (a reverse proxy's name for this Echo): told by a logged-in browser's page, said in
+        # the unsigned hello (the other Echos read it there) and the state; an HTTPS origin and nothing else
+        check("url" not in hello() and not os.path.exists(sf("url")), "no HTTPS address at first: none in hello")
+        check(rq("POST", "/api/url", b"https://kitchen.example.net")[0] == 401 and "url" not in hello(), "the page's address: unsigned refused")
+        for bad in (b"http://kitchen.example.net", b"https://kitchen.example.net/x", b'https://a.b"c', b"https://nodot", b"https://kitchen.example.net:",
+                    b"https://kitchen.example.net:44x", b"https://-", b"https://" + b"a" * 120 + b".net"):
+            check(b.call("POST", "/api/url", bad)[0] == 400 and "url" not in hello(), f"the page's address: {bad[:40]!r} refused")
+        st, _, body = b.call("POST", "/api/url", b"https://kitchen.example.net:8443")
+        check(st == 200 and json.loads(body).get("url") == "https://kitchen.example.net:8443" and hello().get("url") == "https://kitchen.example.net:8443",
+              f"the page's address with a port: {body!r}")
+        want = "https://kitchen.example.net"
+        st, _, body = b.call("POST", "/api/url", want.encode())
+        check(st == 200 and json.loads(body).get("url") == want and hello().get("url") == want and (b.state() or {}).get("device", {}).get("url") == want
+              and open(sf("url")).read() == want + "\n", f"the page's address set: in hello and the state: {body!r}")
         args = proc.args
         proc.terminate(); proc.wait()
         # (as after a reboot: within one boot the adb waits withdrawn above keep a browser that is not approved back
@@ -333,6 +347,8 @@ async def main():
         proc = subprocess.Popen(args, env=env, stderr=open(log, "a")); wait_port(PORT, WEB)
         b = Browser(WEB)
         check(hello()["note"] == "Wohnzimmer, Regal" and b.login_with_button(proc), "the note after a restart")
+        check(hello().get("url") == want, "the page's address after a restart")
+        check(b.call("POST", "/api/url", b"")[0] == 200 and "url" not in hello() and not os.path.exists(sf("url")), "an empty address forgets it")
         check(b"Wohnzimmer" not in b.call("GET", "/api/export")[2], "not in the settings file: it is this Echo's")
         st, _, body = b.call("POST", "/api/note", b"  ")
         check(st == 200 and json.loads(body).get("note") == "" and hello()["note"] == "" and not os.path.exists(sf("note")), "an empty note clears it")
