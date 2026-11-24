@@ -76,7 +76,8 @@ void pf_start(int web_port);
 void pf_shutdown(void);
 /* main.c's arb hook, a message to every member: one of ours (M_REVOKED) is noted for the thread, one place per
  * member FROM (its id in the network), source address IP and the port it names; others are not ours */
-void pf_message(const unsigned char from[8], const char *node, unsigned ip, const unsigned char *p, size_t n);
+struct in6_addr;
+void pf_message(const unsigned char from[8], const char *node, const struct in6_addr *ip, const unsigned char *p, size_t n);
 /* GET /api/plugins/revoked for a member of the network: TICKET, NONCE and MAC its X-HM-Ticket, X-HM-Ctr and X-HM-Mac
  * (plugin_fetch.c member_mac: a ticket this Echo told within two hours, a nonce not taken with it before).  The
  * list's length and *OUT (the caller's to free) as pi_revoked_file; 0 not a member, a request again, or no list,

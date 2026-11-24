@@ -14,7 +14,7 @@ cat > "$T/h.c" <<'C'
 #include <stdio.h>
 int main(void) { const char *f = https_ca_file(); printf("%s\n", f ? f : "(none)"); return !f; }
 C
-cc -O2 -w -DVERSION="\"test\"" -Isrc/hassmic "$T/h.c" src/hassmic/https.c src/hassmic/net.c src/hassmic/hash.c src/hassmic/statefile.c -ldl -lpthread -o "$T/h" 2>"$T/cc.log" || { cat "$T/cc.log"; exit 1; }
+cc -O2 -w -DVERSION="\"test\"" -Isrc/hassmic "$T/h.c" src/hassmic/https.c src/hassmic/fwcurl.c src/hassmic/logread.c src/hassmic/net.c src/hassmic/hash.c src/hassmic/statefile.c -ldl -lpthread -o "$T/h" 2>"$T/cc.log" || { cat "$T/cc.log"; exit 1; }
 out=$(HASSMIC_CA_STORE="$T/store" HASSMIC_STATE="$T/state" "$T/h" 2>"$T/log")
 fail=0
 n=$(grep -c "BEGIN CERTIFICATE" "$T/state/cacerts.bundle.pem" 2>/dev/null || echo 0)

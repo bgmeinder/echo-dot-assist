@@ -1570,7 +1570,7 @@ int arb_member_mode(const char *nd)
     int r = -1; long long now = now_ms();
     pthread_mutex_lock(&lk);
     for (int i = 0; running && in_net && i < NPEER; i++)
-        if (ago(peers[i].seen, now, PEER_TTL_MS) && peers[i].ip && !strcmp(peers[i].node, nd)) { r = peers[i].kiosk ? ARB_KIOSK : ARB_HASSMIC; break; }
+        if (ago(peers[i].seen, now, PEER_TTL_MS) && HAS_IP(peers[i].ip) && !strcmp(peers[i].node, nd)) { r = peers[i].kiosk ? ARB_KIOSK : ARB_HASSMIC; break; }
     pthread_mutex_unlock(&lk);
     return r;
 }

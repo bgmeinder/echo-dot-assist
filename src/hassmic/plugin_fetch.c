@@ -757,7 +757,7 @@ static pthread_mutex_t dl = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t dc = PTHREAD_COND_INITIALIZER;
 /* dl.  serial: the highest it told that waits to be asked for (0 nothing waits), since: when that began, heard: its
  * last word, last: when it was last asked (0 never), ticket: the last it named */
-static struct sender { uint8_t id[8], ticket[8]; unsigned ip; int port, used; long long serial, since, heard, last; char node[40]; } senders[SENDERS];
+static struct sender { uint8_t id[8], ticket[8]; struct in6_addr ip; int port, used; long long serial, since, heard, last; char node[40]; } senders[SENDERS];
 static int tell_now, my_port, started;                                                /* dl */
 static long long budget_at;             /* dl: fetches from members in all (MEMBERS_BURST, MEMBERS_EVERY), as a GCRA's time */
 /* tk: this Echo's tickets, [0] the newest; made 0: none */
@@ -987,11 +987,14 @@ size_t pf_revoked_serve(const char *ticket, const char *nonce, const char *mac, 
 /* The list a member has, from its settings port: GET /api/plugins/revoked, the signature's hex line and the list.
  * The member is only who said it has one; what is taken is what the index key signed, under the same rules as the
  * site's.  1 taken */
-static int member_fetch(unsigned ip, int port, long long serial, const char *node, const uint8_t ticket[8])
+static int member_fetch(const struct in6_addr *ip, int port, long long serial, const char *node, const uint8_t ticket[8])
 {
-    char url[80], a[INET_ADDRSTRLEN], why[240], nonce[17], tick[17], mac[33], h1[40], h2[48], h3[40]; const char *hdrs[4] = { h1, h2, h3, NULL };
-    unsigned char *d = NULL; size_t n = 0; uint8_t sig[64], rb[8]; int r = PI_REFUSED; struct in_addr ia = { ip }; FILE *u;
-    if (!inet_ntop(AF_INET, &ia, a, sizeof a) || port < 1 || port > 65535) return 0;
+    char url[120], a[INET6_ADDRSTRLEN + 2], t[INET6_ADDRSTRLEN], why[240], nonce[17], tick[17], mac[33], h1[40], h2[48], h3[40]; const char *hdrs[4] = { h1, h2, h3, NULL };
+    unsigned char *d = NULL; size_t n = 0; uint8_t sig[64], rb[8]; int r = PI_REFUSED; FILE *u;
+    /* IPv4 (kept as ::ffff:a.b.c.d) as itself, IPv6 in a URL's brackets */
+    if (IN6_IS_ADDR_V4MAPPED(ip)) { if (!inet_ntop(AF_INET, ip->s6_addr + 12, a, sizeof a)) return 0; }
+    else { if (!inet_ntop(AF_INET6, ip, t, sizeof t)) return 0; snprintf(a, sizeof a, "[%s]", t); }
+    if (port < 1 || port > 65535) return 0;
     if (!(u = fopen("/dev/urandom", "rb")) || fread(rb, 1, 8, u) != 8) { if (u) fclose(u); return 0; }
     fclose(u);
     for (int i = 0; i < 8; i++) { snprintf(nonce + 2 * i, 3, "%02x", rb[i]); snprintf(tick + 2 * i, 3, "%02x", ticket[i]); }
@@ -1044,7 +1047,7 @@ static void *daily_thread(void *arg)
     long long next_fetch = mono_ms() + first_ms + rnd(first_spread), next_tell = mono_ms() + tell_ms / 60, next_check = mono_ms() + relist_first;
     (void)arg;
     for (;;) {
-        unsigned ip = 0; int port = 0, now_tell, k; long long serial = 0; char node[40] = ""; uint8_t id[8] = { 0 }, ticket[8] = { 0 };
+        struct in6_addr ip = IN6ADDR_ANY_INIT; int port = 0, now_tell, k; long long serial = 0; char node[40] = ""; uint8_t id[8] = { 0 }, ticket[8] = { 0 };
         pthread_mutex_lock(&dl);
         for (;;) {
             long long now = mono_ms(), until = next_fetch < next_tell ? next_fetch : next_tell; struct timespec ts;
@@ -1073,9 +1076,9 @@ static void *daily_thread(void *arg)
         if (k >= 0 && serial > pi_revoked_serial()) {
             pthread_mutex_lock(&dl);
             { long long now = mono_ms(); if (budget_at < now) budget_at = now; budget_at += members_every; }
-            if (senders[k].used && !memcmp(senders[k].id, id, 8) && senders[k].ip == ip && senders[k].port == port) senders[k].last = mono_ms();
+            if (senders[k].used && !memcmp(senders[k].id, id, 8) && !memcmp(&senders[k].ip, &ip, sizeof ip) && senders[k].port == port) senders[k].last = mono_ms();
             pthread_mutex_unlock(&dl);
-            if (member_fetch(ip, port, serial, node, ticket)) took();
+            if (member_fetch(&ip, port, serial, node, ticket)) took();
         }
         if (mono_ms() >= next_fetch) { daily_fetch(); next_fetch = mono_ms() + period_ms - period_spread / 2 + rnd(period_spread); }
         if (now_tell || mono_ms() >= next_tell) { tell(); next_tell = mono_ms() + tell_ms; }
@@ -1103,7 +1106,16 @@ void pf_shutdown(void)
     pthread_mutex_lock(&dl); pthread_cond_signal(&dc); pthread_mutex_unlock(&dl);
 }
 
-void pf_message(const unsigned char from[8], const char *node, unsigned ip, const unsigned char *p, size_t n)
+/* A member's address is one of this network: IPv4 private or link-local, IPv6 unique local (fc00::/7), or this host
+ * itself (the PC's tests' members).  An IPv6 link-local address is not taken: a URL carries no interface for it, and
+ * an Echo that has only that has an IPv4 or a unique local address in its next beacon */
+static int member_addr_ok(const struct in6_addr *a)
+{
+    if (IN6_IS_ADDR_V4MAPPED(a)) { uint32_t v; memcpy(&v, a->s6_addr + 12, 4); return pnet_local(v) || (ntohl(v) >> 24) == 127; }
+    return (a->s6_addr[0] & 0xfe) == 0xfc || IN6_IS_ADDR_LOOPBACK(a);
+}
+
+void pf_message(const unsigned char from[8], const char *node, const struct in6_addr *ip, const unsigned char *p, size_t n)
 {
     long long s = 0, now = mono_ms(); int port, k = -1;
     if (n != M_LEN || p[0] != M_REVOKED) return;
@@ -1111,12 +1123,12 @@ void pf_message(const unsigned char from[8], const char *node, unsigned ip, cons
      * the PC's tests' members), never from the internet.  The address is the datagram's source and the port the
      * message's, so a word from anywhere else would have this Echo fetch from an address of the sender's choosing
      * (a review of 6631974, 6; member_fetch's socket cannot leave the network either) */
-    if (!pnet_local(ip) && (ntohl(ip) >> 24) != 127) return;
+    if (!member_addr_ok(ip)) return;
     for (int i = 0; i < 8; i++) s = s << 8 | p[1 + i];
     port = p[9] << 8 | p[10];
     if (s <= 0 || s <= pi_revoked_serial() || port < 1) return;
     pthread_mutex_lock(&dl);
-    for (int i = 0; i < SENDERS && k < 0; i++) if (senders[i].used && !memcmp(senders[i].id, from, 8) && senders[i].ip == ip && senders[i].port == port) k = i;
+    for (int i = 0; i < SENDERS && k < 0; i++) if (senders[i].used && !memcmp(senders[i].id, from, 8) && !memcmp(&senders[i].ip, ip, sizeof *ip) && senders[i].port == port) k = i;
     if (k < 0) {
         /* a newcomer: a free place, else one that waits for nothing (the one asked longest ago), else one that waits
          * out its ten minutes (the one asked last: it had its turn), else the one that began to wait last (it was the
@@ -1128,7 +1140,7 @@ void pf_message(const unsigned char from[8], const char *node, unsigned ip, cons
             if (senders[i].last && now - senders[i].last < member_ms && (k < 0 || senders[i].last > senders[k].last)) k = i;
         if (k < 0) for (int i = 0; i < SENDERS; i++)
             if (k < 0 || senders[i].since > senders[k].since) k = i;
-        memset(&senders[k], 0, sizeof senders[k]); senders[k].used = 1; memcpy(senders[k].id, from, 8); senders[k].ip = ip; senders[k].port = port;
+        memset(&senders[k], 0, sizeof senders[k]); senders[k].used = 1; memcpy(senders[k].id, from, 8); senders[k].ip = *ip; senders[k].port = port;
     }
     senders[k].heard = now; memcpy(senders[k].ticket, p + 11, 8);
     if (!senders[k].serial) senders[k].since = now;
