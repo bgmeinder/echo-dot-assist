@@ -40,10 +40,13 @@ static uint8_t told[16][ARB_MSG_MAX]; static size_t told_n[16]; static unsigned 
 int arb_running(void) { return 1; }
 void arb_self(unsigned char id[8]) { memcpy(id, self_id, 8); }
 int arb_derive(const char *label, unsigned char out[32]) { (void)label; memset(out, 0x42, 32); return 0; }
-int arb_member(const char *node, unsigned char id[8], unsigned *ip)
+/* 127.0.0.1 as the Echos keep IPv4: ::ffff:127.0.0.1 */
+static struct in6_addr lo4(void) { struct in6_addr a; inet_pton(AF_INET6, "::ffff:127.0.0.1", &a); return a; }
+unsigned arb_ifindex(void) { return 0; }
+int arb_member(const char *node, unsigned char id[8], struct in6_addr *ip)
 {
     if (strcmp(node, "echo-p")) return -1;
-    memcpy(id, peer_id, 8); *ip = inet_addr("127.0.0.1");
+    memcpy(id, peer_id, 8); *ip = lo4();
     return 0;
 }
 int arb_tell(const unsigned char to[8], const void *p, size_t n)
@@ -166,7 +169,7 @@ int main(void)
     { uint8_t p[ARB_MSG_MAX] = { 0 }, esk[32], epk[32], acc[ARB_MSG_MAX], kd[32], shared[32], m[56];
       ws_random(call_id, 8); ws_random(esk, 32); crypto_x25519_public_key(epk, esk);
       p[0] = 1; memcpy(p + 1, call_id, 8); p[9] = (uint8_t)(pa & 0xff); p[10] = (uint8_t)(pa >> 8); memcpy(p + 11, epk, 32); p[43] = 0;
-      dropin_message(peer_id, "echo-p", inet_addr("127.0.0.1"), p, 44);
+      { struct in6_addr from = lo4(); dropin_message(peer_id, "echo-p", &from, p, 44); }
       CHECK(last_told(2, acc) && until(live, 1000), "the other Echo's invite: accepted, connected");
       arb_derive("", kd); crypto_x25519(shared, esk, acc + 11);
       memcpy(m, shared, 32); memcpy(m + 32, call_id, 8); memcpy(m + 40, peer_id, 8); memcpy(m + 48, self_id, 8);
