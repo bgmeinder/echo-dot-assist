@@ -638,7 +638,12 @@ function renderThrough(members) {
   const box = $('through'); box.innerHTML = '';
   if (!members.length) return;
   box.append(h('p', { class: 'or' }, h('span', {}, 'or, if this browser is logged in on another of your Echos')));
-  for (const m of members) box.append(h('button', { class: 'big', style: 'margin-top:8px', onclick: () => askThrough(m) }, `Log in through ${m.node}`));
+  // From an HTTPS page only an Echo whose HTTPS address is known can be asked: its plain address is another site to
+  // the browser, where it is not logged in (and may not be called from here at all)
+  const reach = (m) => location.protocol !== 'https:' || httpsOf(m.ip);
+  for (const m of members.filter(reach)) box.append(h('button', { class: 'big', style: 'margin-top:8px', onclick: () => askThrough(m) }, `Log in through ${m.node}`));
+  const out = members.filter((m) => !reach(m));
+  if (out.length) box.append(h('p', { class: 'help' }, `Not offered: ${out.map((m) => m.node).join(', ')}. Open ${out.length === 1 ? 'its' : 'their'} own page once at ${out.length === 1 ? 'its' : 'their'} HTTPS address, logged in, and ${out.length === 1 ? 'it shows' : 'they show'} here.`));
 }
 
 async function askThrough(m) {
@@ -670,6 +675,17 @@ async function answerVouch() {
   const members = (state.arbitration && state.arbitration.members) || [];
   // (a URL's IPv6 host is in brackets; an Echo asking from its HTTPS address is known by that)
   let ok = members.some((x) => x.ip === host.replace(/^\[|\]$/g, '') || baseOf(x.ip) === q.origin);
+  // An Echo that asks from an HTTPS name nobody knows yet: it learns its name from a logged-in browser's page, and
+  // this very login is how the browser gets in there (the first login through another Echo was refused for good,
+  // 2026-11-23).  Taken when it is a sibling of this page's own name under the owner's domain (kitchen.example.net asks
+  // office.example.net: whoever serves a name there with a certificate is the owner's proxy), over HTTPS both; the
+  // key it names is still checked at that address below, and the voucher only opens the Echo that holds it
+  const sibling = (() => {
+    const mine = location.hostname, at = mine.indexOf('.'), its = host.indexOf('.');
+    return location.protocol === 'https:' && q.origin.startsWith('https://') && at > 0 && its > 0
+      && mine.slice(at) === host.slice(its) && mine.slice(at).split('.').length >= 3 && /[a-z]/i.test(mine.slice(at));
+  })();
+  ok = ok || sibling;
   if (ok) { try { ok = (await (await fetch(q.origin + '/api/hello')).json()).pub === q.target; } catch (e) { ok = false; } }
   const box = h('div', { class: 'callout ' + (ok ? 'info' : 'bad') }, icon(ok ? 'key' : 'warn'));
   $('vouch').append(box);                         // not #attention: that one is redrawn at every refresh, and this waits for an answer

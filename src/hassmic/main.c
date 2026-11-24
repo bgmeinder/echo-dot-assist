@@ -4630,7 +4630,10 @@ int main(int argc, char **argv)
                                                      * Spot showed the digital clock for 2 s at boot before its face */
       const char *const *faces = clockface_names(&n);
       if (!settings_peek("clock_face", v, sizeof v)) for (int i = 0; i < n; i++) if (!strcmp(v, faces[i])) ring_band_face(i);
-      if (!settings_peek("round_clock", v, sizeof v)) ring_band_clock(!strcmp(v, "24h") ? 1 : !strcmp(v, "12h") ? 2 : 0); }
+      if (!settings_peek("round_clock", v, sizeof v)) ring_band_clock(!strcmp(v, "24h") ? 1 : !strcmp(v, "12h") ? 2 : 0);
+      /* never chosen: a round screen shows the digital clock, 12 h (a new Spot's screen stayed black until someone
+       * found the setting, 2026-11-23); "off" once chosen is saved and stays off */
+      else if (board.screen_round) ring_band_clock(2); }
     ring_start(led_run, ring_reloaded);
     /* the light sensor's first reading before any thread that asks for it: the first core_lux() reads the sensor itself
      * (~800 ms on the Spot's OPT3001) and every other caller waits for it, settings_load under core_lock among them,

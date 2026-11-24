@@ -950,6 +950,9 @@ static int clock_tick(int fd)                   /* -1: the renderer is gone */
     pthread_mutex_lock(&lock); int mode = clock_mode, face = clock_face, ver = face_ver; pthread_mutex_unlock(&lock);
     if (asleep && mode && clock_shown) return 0;    /* the screen off for the night: nothing read or drawn till it wakes */
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
+    /* a clock nobody has set yet (a new Echo before Home Assistant gave it the time: its RTC says 2010) shows no time
+     * rather than a wrong one */
+    if (tm.tm_year + 1900 < 2026) mode = 0;
     int minute = tm.tm_hour * 60 + tm.tm_min;
     if (mode && face > 0 && face <= clockface_count()) {
         int second = minute * 60 + tm.tm_sec;
