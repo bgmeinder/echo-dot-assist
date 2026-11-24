@@ -72,7 +72,21 @@ put() { cat > $O/$1.$$ && chmod 644 $O/$1.$$ && mv $O/$1.$$ $O/$1; }       # wha
 hex() { case $1 in ''|*[!0-9a-f]*) return 1;; esac; [ ${#1} -le $2 ] && [ $(( ${#1} % 2 )) = 0 ]; }
 field() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
-status() { Q status | sed 's/^ssid="\(.*\)"$/ssid=\1/' | grep -E '^(wpa_state|id|ssid|ip_address|freq)=' | put status; }    # WifiInfo quotes the name
+# The interface's IPv6 address to show and to count: a unique local one (fc00::/7) before a global one; none still
+# being checked for duplicates, failed or on its way out.  Nothing where the firmware has no ip tool or IPv6 is off
+addr6() {
+    ip -6 addr show dev $WLAN scope global 2>/dev/null | grep -v -e tentative -e dadfailed -e deprecated |
+        sed -n 's/^ *inet6 \([0-9a-fA-F:]*\)\/.*/\1/p' | {
+        u= g=
+        while read -r a; do case $a in [fF][cCdD]*) [ -n "$u" ] || u=$a;; *) [ -n "$g" ] || g=$a;; esac; done
+        echo "${u:-$g}"; }
+}
+# (the IPv6 address where there is one: on a network without IPv4 the page showed none, and its links to this Echo
+# are by this address)
+status() {
+    st=$(Q status | sed 's/^ssid="\(.*\)"$/ssid=\1/' | grep -E '^(wpa_state|id|ssid|ip_address|freq)='); a=$(addr6)   # WifiInfo quotes the name
+    { if [ -n "$a" ]; then printf '%s\n' "$st" | grep -v '^ip_address='; echo "ip_address=$a"; else printf '%s\n' "$st"; fi; } | put status
+}
 
 # One run at a time.  The lock names its process and the boot, so that one left by a run that died is known as such.
 boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }
@@ -120,7 +134,24 @@ lease() {
 }
 # On the network for real: a fresh lease (above) on the interface, and its router answers ARP on this link.  ARP rather
 # than the ping's answer: a router may drop pings, never ARP.  Without dhcpcd's properties: the interface's address.
+# IPv6 first (online below): a network without IPv4 DHCP was taken for "no address", and the switch went back.
+# IPv6's: an address beyond the link, and its router reachable in the neighbour table after a ping.  REACHABLE only:
+# the kernel keeps the last network's address, default route and a STALE entry for its router across a switch, and
+# only an answer on this link makes the entry REACHABLE.  A network that routes no IPv6 counts with the address alone
+online6() {
+    ip=$(addr6) gw=
+    [ -n "$ip" ] || return 1
+    gw=$(ip -6 route show default dev $WLAN 2>/dev/null | sed -n 's/^default via \([^ ]*\).*/\1/p' | head -n 1)
+    [ -n "$gw" ] || return 0
+    ping6 -c 1 -W 1 -I $WLAN $gw > /dev/null 2>&1
+    ip -6 neigh show dev $WLAN 2>/dev/null | grep -qE "^$gw .*REACHABLE\$"
+}
 online() {
+    online6 && return 0
+    v6=$ip; online4 && return 0
+    ip=${v6:-$ip}; return 1
+}
+online4() {
     ip=$(ifconfig $WLAN 2>/dev/null | sed -n -e 's/.*inet addr:\([0-9.]*\).*/\1/p' -e 's/.*: ip \([1-9][0-9.]*\) mask.*/\1/p') gw=
     [ -n "$ip" ] || return 1
     [ -n "$PROPS" ] || return 0

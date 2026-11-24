@@ -291,6 +291,14 @@ keep() {
     else
         echo "-A INPUT -p icmpv6 -j ACCEPT"                                # neighbour discovery: no IPv6 without it
         echo "-A INPUT -i $WLAN -p udp -m udp --dport 546 -j ACCEPT"       # DHCPv6
+        # hassmic's ports and mDNS over IPv6 as over IPv4 above (Home Assistant by the Echo's IPv6 address, the other
+        # Echos' arbitration to ff02::114 and Drop In from their unique local addresses), but from this network's own
+        # addresses only, link-local and unique local: IPv4 has the router's NAT in front, a global IPv6 address has
+        # at best the router's firewall
+        for s in fe80::/10 fc00::/7; do
+            for p in udp tcp; do echo "-A INPUT -s $s -i $WLAN -p $p -m $p --dport 16384:32767 -j ACCEPT"; done
+            echo "-A INPUT -s $s -i $WLAN -p udp -m udp --dport 5353 -j ACCEPT"
+        done
     fi
 }
 # Those of them that the listing $2 ("iptables -S") does not have
