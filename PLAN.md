@@ -6181,20 +6181,26 @@ Open, in this order:
 ## Fire OS polish — from the Linux port, 2026-11-22
 
 What the Echo Spot's plain-Linux work (branch `spot-linux`, its own line from now on) found that the Fire OS builds
-should take too. Each names where it was done there; none of it is here yet.
+should take too. Each names where it was done there. Also here since 2026-11-23, from the same line: the settings
+page's other Echos over IPv6 and at their HTTPS proxy names, login through another Echo behind a proxy, an Echo's
+address moving only on a fresh packet, the round screen's clock on unless told not to.
 
 - [ ] **The Spot's antenna fix** (Wi-Fi on one chain, Bluetooth on the other, the firmware's coexistence off): music
       from a phone without dropouts on 2.4 GHz. The plan for this image: [devices/rook/antenna-fix-fireos.md](devices/rook/antenna-fix-fireos.md).
-- [ ] **Echo to Echo over IPv6, IPv4 kept** (spot-linux 46500ac, 03d12ec): arbitration's packets to `ff02::114` from the
+- [x] **Echo to Echo over IPv6, IPv4 kept** (here since 2026-11-23, PC tests only; lockdown.sh admits hassmic's ports
+      over IPv6 from link-local and unique local addresses: not run on an Echo)
+      **was:** (spot-linux 46500ac, 03d12ec): arbitration's packets to `ff02::114` from the
       Echo's ULA (IPV6_PKTINFO) and a copy to IPv4 broadcast; the receiver keeps the better address (ULA, global,
       link-local, IPv4: `addr_take`); Drop In's socket dual-stack. Here arbitration and Drop In are IPv4 broadcast only,
       so on an IPv6-only network Echos do not find each other. Lockdown's rules need `ff02::114` and the UDP ports in
       for IPv6 as well.
-- [ ] **`.local` names AAAA first** (spot-linux `net.c` `mdns_resolve6`, then `mdns_resolve4`; `https.c` the same):
+- [x] **`.local` names AAAA first** (here since 2026-11-23) (spot-linux `net.c` `mdns_resolve6`, then `mdns_resolve4`; `https.c` the same):
       media from a Home Assistant named by mDNS on an IPv6-only network.
-- [ ] **Improv's settings-page URL with an IPv6 address in brackets** (spot-linux `improv.c`): a phone got a broken link
+- [x] **Improv's settings-page URL with an IPv6 address in brackets** (here since 2026-11-23) (spot-linux `improv.c`): a phone got a broken link
       once the address was IPv6's.
-- [ ] **The Wi-Fi switch's "on the network" check, IPv6 first** (spot-linux `scripts/device/wifi.sh` `online6`): an IPv6
+- [x] **The Wi-Fi switch's "on the network" check, IPv6 first** (here since 2026-11-23 for the Dots' world, `online6`
+      in `scripts/device/wifi.sh`; not run on an Echo, and the Android models' `aonline` is IPv4 still)
+      **was:** (spot-linux `scripts/device/wifi.sh` `online6`): an IPv6
       address and its router answering count before IPv4's lease; status shows the IPv6 address. Here a network
       without IPv4 DHCP is taken for "no address" and the switch goes back.
 - [ ] **Tests that check plumbing, not defaults**: `tests/fake_ha_esphome_timers.py` asserts "manual at 47 % by default";
