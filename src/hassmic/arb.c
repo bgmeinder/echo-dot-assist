@@ -556,8 +556,11 @@ static void get_node(struct rd *r, char out[NLEN])
  * to a network without it).  Only from packets that passed the network's tag, and of those only from a fresh one
  * (fresh()) or the other copy of the last fresh one: its counter, within ADDR_COPY_MS of it (peer_addr).  A recorded
  * packet replayed later, from anywhere (an attacker's ULA ranks first), never moves an Echo's address, nor Drop In's
- * audio with it */
-#define ADDR_STALE_MS 60000
+ * audio with it.
+ * As long as a member counts at all (PEER_TTL_MS): it was 60 s, two or three beacons, and multicast over Wi-Fi loses
+ * that many in a row often enough that an Echo's address on the page went from its ULA to IPv4 and back every few
+ * minutes (four Spots, 2026-11-23; the IPv4 copy, a broadcast, got through meanwhile) */
+#define ADDR_STALE_MS PEER_TTL_MS
 #define ADDR_COPY_MS  1000          /* the IPv4 and IPv6 copies of one packet come within this of each other */
 static int addr_rank(const struct in6_addr *a)
 {
