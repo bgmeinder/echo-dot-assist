@@ -205,15 +205,19 @@ static char note[NOTE_MAX + 1];
  * page tells its Echo where it was opened (POST /api/url, a logged-in browser's, HTTPS only: state/url), the Echo
  * says it in its hello ("url"), and every Echo asks the others of its network for theirs once a minute (their
  * unsigned hello, over the LAN) and hands the page the lot ("urls": address -> url).  Nothing is configured: open
- * each Echo's page once at its HTTPS name.  Not a secret (a name the proxy serves), not in exports */
+ * each Echo's page once at its HTTPS name.  Not a secret (a name the proxy serves), not in exports.
+ * The same hello gives each member's page key ("pubs": address -> key, to a logged-in page only): what the page
+ * holds a login request from an HTTPS name nobody knows yet against (app.js answerVouch) */
 #define URL_MAX 120
 #define PEER_URLS 16                /* arb.c NPEER */
 static pthread_mutex_t url_lk = PTHREAD_MUTEX_INITIALIZER;      /* page_url and peer_urls: never held over I/O */
 static char page_url[URL_MAX + 1];
-static struct { char ip[46], url[URL_MAX + 1]; } peer_urls[PEER_URLS];
+struct peer_page { char ip[46], url[URL_MAX + 1], pub[65]; };
+static struct peer_page peer_urls[PEER_URLS];
 static int npeer_urls;
 /* /api/hello: the rest <= ~950 bytes (name, node 160 each, note 168, url 130), members <= 16 x ~104 (arb.c NPEER,
- * NLEN), urls <= 16 x ~175; a hello cut short is no JSON, and the login page cannot start */
+ * NLEN), urls <= 16 x ~175 (pubs, <= 16 x ~120, only in the state's copy, which has no members); a hello cut short
+ * is no JSON, and the login page cannot start */
 #define HELLO_MAX 8192
 #define NONCE_MS 120000
 static struct { uint8_t pub[32], nonce[16]; long long at; } nonces[8];      /* handed out for a login through another Echo */
@@ -1343,9 +1347,9 @@ static int url_save(const char *s, size_t len)
     return e;
 }
 
-/* The "url" of the Echo at IP, from its unsigned hello (plain HTTP on the page's port, 2 s at most): into out, ""
- * where it names none (or is an older hassmic).  -1: no answer */
-static int peer_url(const char *ip, char out[URL_MAX + 1])
+/* The "url" and the page key of the Echo at IP, from its unsigned hello (plain HTTP on the page's port, 2 s a read
+ * at most): url "" where it names none (or is an older hassmic), pub "" where it is not 64 hex digits.  -1: no answer */
+static int peer_hello(const char *ip, char url[URL_MAX + 1], char pub[65])
 {
     char port[8], buf[HELLO_MAX + 512]; size_t n = 0; ssize_t r;
     static const char req[] = "GET /api/hello HTTP/1.0\r\nHost: echo\r\n\r\n";
@@ -1355,20 +1359,23 @@ static int peer_url(const char *ip, char out[URL_MAX + 1])
     if (write(fd, req, sizeof req - 1) != (ssize_t)(sizeof req - 1)) { close(fd); return -1; }
     while (n < sizeof buf - 1 && (r = read(fd, buf + n, sizeof buf - 1 - n)) > 0) n += (size_t)r;
     close(fd);
-    buf[n] = 0; out[0] = 0;
+    buf[n] = 0; url[0] = pub[0] = 0;
     char *b = strstr(buf, "\r\n\r\n"), *u = b ? strstr(b, "\"url\":\"") : NULL, *e = u ? strchr(u + 7, '"') : NULL;
     if (!b) return -1;
-    if (e && (size_t)(e - (u + 7)) <= URL_MAX) { memcpy(out, u + 7, (size_t)(e - (u + 7))); out[e - (u + 7)] = 0; if (!url_ok(out)) out[0] = 0; }
+    if (e && (size_t)(e - (u + 7)) <= URL_MAX) { memcpy(url, u + 7, (size_t)(e - (u + 7))); url[e - (u + 7)] = 0; if (!url_ok(url)) url[0] = 0; }
+    if ((u = strstr(b, "\"pub\":\"")) && strlen(u + 7) > 64 && u[7 + 64] == '"' && strspn(u + 7, "0123456789abcdef") == 64) { memcpy(pub, u + 7, 64); pub[64] = 0; }
     return 0;
 }
 
-/* Every minute: the HTTPS address of each Echo of our network, as it says it itself */
+/* Every minute: the HTTPS address and the page key of each Echo of our network, as it says them itself.  One that
+ * gives no answer this time (busy for a moment: installing models, a restart) keeps what it said last, as long as it
+ * is a member: its address taken off the list for a minute showed it as "not reachable over HTTPS" on every page */
 static void *peer_urls_thread(void *arg)
 {
     (void)arg;
     for (sleep(15);; sleep(60)) {
-        char js[PEER_URLS * 110 + 16], ip[46], u[URL_MAX + 1];
-        struct { char ip[46], url[URL_MAX + 1]; } got[PEER_URLS]; int n = 0;
+        char js[PEER_URLS * 110 + 16], ip[46];
+        struct peer_page got[PEER_URLS]; int n = 0;
         if (!core_web_port) continue;
         arb_members_json(js, sizeof js);
         for (char *p = js, *e; n < PEER_URLS && (p = strstr(p, "\"ip\":\"")); p = e) {
@@ -1376,7 +1383,15 @@ static void *peer_urls_thread(void *arg)
             if (!(e = strchr(p, '"'))) break;
             if ((size_t)(e - p) >= sizeof ip) continue;
             memcpy(ip, p, (size_t)(e - p)); ip[e - p] = 0;
-            if (!peer_url(ip, u) && u[0]) { snprintf(got[n].ip, sizeof got[n].ip, "%s", ip); snprintf(got[n].url, sizeof got[n].url, "%s", u); n++; }
+            snprintf(got[n].ip, sizeof got[n].ip, "%s", ip);
+            if (peer_hello(ip, got[n].url, got[n].pub)) {
+                int had = 0;
+                pthread_mutex_lock(&url_lk);
+                for (int i = 0; i < npeer_urls && !had; i++) if (!strcmp(peer_urls[i].ip, ip)) { got[n] = peer_urls[i]; had = 1; }
+                pthread_mutex_unlock(&url_lk);
+                if (!had) continue;
+            }
+            n++;
         }
         pthread_mutex_lock(&url_lk);
         memcpy(peer_urls, got, sizeof got[0] * (size_t)n); npeer_urls = n;
@@ -1388,7 +1403,8 @@ static void *peer_urls_thread(void *arg)
 /* members: the Echos of our network (for the login page's "through another Echo"; what beacons say anyway).
  * port: the page's own, which it calls the other Echos on; the URL it was opened at may be a reverse proxy's (80, 443).
  * url, urls: this Echo's HTTPS address and the other Echos' by their addresses (above), where any is known; "url"
- * comes before the lists, within what peer_url reads of a hello */
+ * and "pub" come before the lists, within what peer_hello reads of a hello.  pubs: the other Echos' page keys by
+ * their addresses, without members only (the state's copy, for a logged-in page) */
 static size_t hello_json(char *o, size_t cap, int members)
 {
     char p[65], name[160], node[160], nt[NOTE_MAX * 2 + 8]; size_t n;    /* no control characters in it: 2 bytes a byte at most */
@@ -1403,8 +1419,14 @@ static size_t hello_json(char *o, size_t cap, int members)
     if (board.action_combo && n < cap) n += (size_t)snprintf(o + n, cap - n, ",\"action\":\"volume_keys\"");
     if (members && n < cap) { n += (size_t)snprintf(o + n, cap - n, ",\"members\":"); if (n < cap) n += arb_members_json(o + n, cap - n); }
     pthread_mutex_lock(&url_lk);
-    for (int i = 0; i < npeer_urls && n < cap; i++)             /* url_ok's and inet_ntop's characters: nothing to escape */
-        n += (size_t)snprintf(o + n, cap - n, "%s\"%s\":\"%s\"%s", i ? "," : ",\"urls\":{", peer_urls[i].ip, peer_urls[i].url, i == npeer_urls - 1 ? "}" : "");
+    int k = 0;                                                  /* url_ok's, inet_ntop's and hex characters: nothing to escape */
+    for (int i = 0; i < npeer_urls && n < cap; i++) if (peer_urls[i].url[0])
+        n += (size_t)snprintf(o + n, cap - n, "%s\"%s\":\"%s\"", k++ ? "," : ",\"urls\":{", peer_urls[i].ip, peer_urls[i].url);
+    if (k && n < cap) n += (size_t)snprintf(o + n, cap - n, "}");
+    k = 0;
+    for (int i = 0; !members && i < npeer_urls && n < cap; i++) if (peer_urls[i].pub[0])
+        n += (size_t)snprintf(o + n, cap - n, "%s\"%s\":\"%s\"", k++ ? "," : ",\"pubs\":{", peer_urls[i].ip, peer_urls[i].pub);
+    if (k && n < cap) n += (size_t)snprintf(o + n, cap - n, "}");
     pthread_mutex_unlock(&url_lk);
     if (n < cap) n += (size_t)snprintf(o + n, cap - n, "}");
     return n < cap ? n : cap - 1;

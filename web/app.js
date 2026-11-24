@@ -678,12 +678,15 @@ async function answerVouch() {
   // An Echo that asks from an HTTPS name nobody knows yet: it learns its name from a logged-in browser's page, and
   // this very login is how the browser gets in there (the first login through another Echo was refused for good,
   // 2026-11-23).  Taken when it is a sibling of this page's own name under the owner's domain (kitchen.example.net asks
-  // office.example.net: whoever serves a name there with a certificate is the owner's proxy), over HTTPS both; the
-  // key it names is still checked at that address below, and the voucher only opens the Echo that holds it
+  // office.example.net), over HTTPS both, AND the key it wants opened is the page key of an Echo of this network, as
+  // this Echo read it from that member itself over the LAN (state.device.pubs, web.c).  The name alone says nothing
+  // where the parent is shared with strangers (x.duckdns.org and y.duckdns.org are siblings too); the key it names
+  // is still checked at that address below, and the voucher only opens the Echo that holds it
   const sibling = (() => {
     const mine = location.hostname, at = mine.indexOf('.'), its = host.indexOf('.');
     return location.protocol === 'https:' && q.origin.startsWith('https://') && at > 0 && its > 0
-      && mine.slice(at) === host.slice(its) && mine.slice(at).split('.').length >= 3 && /[a-z]/i.test(mine.slice(at));
+      && mine.slice(at) === host.slice(its) && mine.slice(at).split('.').length >= 3 && /[a-z]/i.test(mine.slice(at))
+      && Object.values((state.device && state.device.pubs) || {}).includes(q.target);
   })();
   ok = ok || sibling;
   if (ok) { try { ok = (await (await fetch(q.origin + '/api/hello')).json()).pub === q.target; } catch (e) { ok = false; } }
