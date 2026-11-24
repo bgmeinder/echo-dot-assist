@@ -100,6 +100,13 @@ for m in re.finditer(r'pb_str\(&\w+,\s*3,\s*([^;]*?)\);', code):
         own += [fmt.replace("%d", str(i)) for i in range(0, 100)]; continue
     # not a name: the plugin's own (held below), a wake word's language (field 3 of a nested message), the MAC
     if e in ("e->name", "w[i].lang", "mac()"): continue
+    # a setting shown as an entity under its own label (the round screen's night: settings.c's table, the label its
+    # second string)
+    if e == "st->label":
+        table = re.sub(r'/\*.*?\*/', ' ', open(os.path.join(ROOT, "src/hassmic/settings.c"), encoding="utf-8").read(), flags=re.S)
+        labels = re.findall(r'\[\w+\]\s*=\s*\{\s*"[^"\n]*",\s*"([^"\n]*)"', table)
+        check(len(labels) > 20, f"settings.c's labels read: {len(labels)}")
+        own += [cstr(x) for x in labels]; continue
     unread.append(e)
 check(not unread, "every name of hassmic's own read (field 3 of what it sends: a literal, an array of them, a run-time form)", unread)
 check(len(own) > 150 and "Last heard" in own and "Light ring LED 12" in own and "Assistant volume" in own and "Equalizer bass" in own

@@ -1707,7 +1707,10 @@ int arb_start(int port, const char *nd, const struct arb_hooks *h)
     memset(&a, 0, sizeof a); a.sin6_family = AF_INET6; a.sin6_port = htons((uint16_t)port); a.sin6_addr = in6addr_any;
     if (bind(sock, (struct sockaddr *)&a, sizeof a)) { perror("arbitration: bind"); close(sock); sock = -1; return -1; }
     dest = a; dest4 = a;
-    { const char *a4 = getenv("HASSMIC_ARB_ADDR4"); struct in_addr v4; v4.s_addr = htonl(INADDR_BROADCAST);
+    { const char *a4 = getenv("HASSMIC_ARB_ADDR4"); struct in_addr v4, t4; v4.s_addr = htonl(INADDR_BROADCAST);
+      /* HASSMIC_ARB_ADDR with an IPv4 address, as tests from before IPv6 give it ("127.255.255.255"): IPv4's then,
+       * and the IPv6 group stays the default */
+      if (addr && inet_pton(AF_INET, addr, &t4) == 1) { if (!a4) a4 = addr; addr = NULL; }
       if (a4) inet_pton(AF_INET, a4, &v4);
       dest4.sin6_addr.s6_addr[10] = dest4.sin6_addr.s6_addr[11] = 0xff; memcpy(dest4.sin6_addr.s6_addr + 12, &v4, 4); }
     char grp[64]; snprintf(grp, sizeof grp, "%s", addr ? addr : ARB_GROUP);

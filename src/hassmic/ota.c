@@ -666,6 +666,21 @@ static void park(int fd, const char *line)
     parked[at].fd = fd; parked[at].until = now + PARK_MS;
 }
 
+/* The peer's address as the 32-bit key the per-address counts go by (0: unknown).  The sockets are IPv6's and take
+ * IPv4 as ::ffff:a.b.c.d: that is the IPv4 address itself; an IPv6 peer is known by its /64 (a host has as many
+ * addresses in its prefix as it likes, and a count per address would be none) */
+static uint32_t peer_key(int fd)
+{
+    struct sockaddr_storage ss; socklen_t sl = sizeof ss; uint32_t w[2];
+    if (getpeername(fd, (struct sockaddr *)&ss, &sl)) return 0;
+    if (ss.ss_family == AF_INET) return ((struct sockaddr_in *)&ss)->sin_addr.s_addr;
+    if (ss.ss_family != AF_INET6) return 0;
+    const struct in6_addr *a = &((struct sockaddr_in6 *)&ss)->sin6_addr;
+    if (IN6_IS_ADDR_V4MAPPED(a)) { memcpy(w, a->s6_addr + 12, 4); return w[0]; }
+    memcpy(w, a->s6_addr, 8);
+    return (w[0] ^ w[1]) ? (w[0] ^ w[1]) : 1;
+}
+
 static void *listener(void *arg)
 {
     int ls = net_listen(port);
@@ -674,13 +689,13 @@ static void *listener(void *arg)
     fprintf(stderr, "update: push port %d\n", port);
     for (int i = 0; i < CONNS_MAX; i++) pcs[i].fd = -1;
     for (;;) {
-        struct pollfd p = { ls, POLLIN, 0 }; struct sockaddr_in sa; socklen_t sl = sizeof sa; uint32_t addr = 0;
+        struct pollfd p = { ls, POLLIN, 0 }; uint32_t addr = 0;
         struct pconn *c = NULL, *old = NULL; int fd, mine = 0, pre = 0, r; pthread_t t; pthread_attr_t at;
         r = poll(&p, 1, 250); park_reap(0);
         if (r < 0 && errno != EINTR) break;
         if (r <= 0) continue;
         if ((fd = net_accept(ls)) < 0) break;
-        if (!getpeername(fd, (struct sockaddr *)&sa, &sl) && sa.sin_family == AF_INET) addr = sa.sin_addr.s_addr;
+        addr = peer_key(fd);
         pthread_mutex_lock(&cl);
         for (int i = 0; i < CONNS_MAX; i++) {
             if (pcs[i].fd < 0) { if (!c) c = &pcs[i]; continue; }
