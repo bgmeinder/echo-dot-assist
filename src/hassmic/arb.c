@@ -1491,6 +1491,14 @@ static size_t jstr(char *o, size_t cap, const char *s)          /* node names: [
     return n;
 }
 
+/* An Echo's address for the page: IPv6 as it is; one heard over IPv4 alone (kept as ::ffff:a.b.c.d here) as the IPv4
+ * address it is.  The page showed "::ffff:192.168.1.93" for such an Echo (2026-11-23) */
+static void ip_text(const struct in6_addr *a, char out[INET6_ADDRSTRLEN])
+{
+    if (IN6_IS_ADDR_V4MAPPED(a)) inet_ntop(AF_INET, a->s6_addr + 12, out, INET6_ADDRSTRLEN);
+    else inet_ntop(AF_INET6, a, out, INET6_ADDRSTRLEN);
+}
+
 size_t arb_status_json(char *o, size_t cap)
 {
     size_t n = 0; long long now = now_ms(); char t[NLEN], ip[INET6_ADDRSTRLEN]; int k = 0;
@@ -1508,7 +1516,7 @@ size_t arb_status_json(char *o, size_t cap)
     if (q >= 0) J("%d},", q); else J("null},");
     J("\"members\":[");
     for (int i = 0; i < NPEER; i++) if (ago(peers[i].seen, now, PEER_TTL_MS)) {
-        inet_ntop(AF_INET6, &peers[i].ip, ip, sizeof ip); jstr(t, sizeof t, peers[i].node);
+        ip_text(&peers[i].ip, ip); jstr(t, sizeof t, peers[i].node);
         int v[NDELAY], nv = samples_of(&peers[i], v); const struct rival *rv = rival(peers[i].id, 0);
         /* quiet with the kiosk flag: it takes part, the kiosk way.  late_ms: 95 % of its claims came within it; rounds:
          * of ours kept for it (OBS_KEEP at most), close: in how many it beat ours or came within RIVAL_DB */
@@ -1520,7 +1528,7 @@ size_t arb_status_json(char *o, size_t cap)
     J("],\"others\":["); k = 0;
     for (int i = 0; i < NPEER; i++) if (ago(cands[i].seen, now, PEER_TTL_MS)) {
         struct cand *c = &cands[i]; const char *st;
-        inet_ntop(AF_INET6, &c->ip, ip, sizeof ip); jstr(t, sizeof t, c->node);
+        ip_text(&c->ip, ip); jstr(t, sizeof t, c->node);
         st = !c->net ? "none" : in_net && c->net > net_id ? "younger" : "older";      /* none: not in a network (yet) */
         J("%s{\"node\":\"%s\",\"ip\":\"%s\",\"network\":", k++ ? "," : "", t, HAS_IP(c->ip) ? ip : "");
         if (c->net) J("\"%016llx\"", (unsigned long long)c->net); else J("null");
@@ -1547,7 +1555,7 @@ size_t arb_members_json(char *o, size_t cap)
     pthread_mutex_lock(&lk);
     n += (size_t)snprintf(o + n, cap - n, "[");
     for (int i = 0; running && in_net && i < NPEER && n < cap; i++) if (ago(peers[i].seen, now, PEER_TTL_MS) && HAS_IP(peers[i].ip)) {
-        inet_ntop(AF_INET6, &peers[i].ip, ip, sizeof ip); jstr(t, sizeof t, peers[i].node);
+        ip_text(&peers[i].ip, ip); jstr(t, sizeof t, peers[i].node);
         n += (size_t)snprintf(o + n, cap - n, "%s{\"node\":\"%s\",\"ip\":\"%s\"}", k++ ? "," : "", t, ip);
     }
     if (n < cap) n += (size_t)snprintf(o + n, cap - n, "]");
