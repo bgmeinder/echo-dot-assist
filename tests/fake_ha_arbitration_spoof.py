@@ -65,12 +65,12 @@ async def main():
     ula = lambda p: s6.sendto(p, (GROUP, ARB, 0, idx))      # from the test's ULA: a better address than IPv4's
     def ip(): return next((m["ip"] for m in a.page.state()["arbitration"]["members"] if m["node"] == pnode), None)
     v4(beacon(1))
-    check(await until(lambda: ip() == "::ffff:127.0.0.1", 3), f"a member heard over IPv4: kept at its IPv4 address ({ip()})")
+    check(await until(lambda: ip() == "127.0.0.1", 3), f"a member heard over IPv4: kept at its IPv4 address ({ip()})")
     v4(beacon(2)); await asyncio.sleep(ADDR_COPY * 1.5)
     ula(beacon(1)); await asyncio.sleep(0.5)
-    check(ip() == "::ffff:127.0.0.1", f"an older beacon of the member's replayed from a ULA: the member's address stays ({ip()})")
+    check(ip() == "127.0.0.1", f"an older beacon of the member's replayed from a ULA: the member's address stays ({ip()})")
     ula(beacon(2)); await asyncio.sleep(0.5)
-    check(ip() == "::ffff:127.0.0.1", f"its last beacon replayed from a ULA after the copy window: the address stays ({ip()})")
+    check(ip() == "127.0.0.1", f"its last beacon replayed from a ULA after the copy window: the address stays ({ip()})")
     v4(beacon(3)); ula(beacon(3))
     check(await until(lambda: ip() == own_addr(), 2), f"a fresh beacon and its IPv6 copy at once: the member moves to the ULA ({ip()})")
 
