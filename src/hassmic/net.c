@@ -29,8 +29,16 @@ int net_online(void)
     if (f) return access(f, F_OK) == 0;
     struct ifaddrs *ifs, *i; int on = 0;
     if (getifaddrs(&ifs)) return 1;                     /* cannot tell: assume it is fine (improv.c: never advertise for nothing) */
-    for (i = ifs; i && !on; i = i->ifa_next)
-        on = i->ifa_addr && i->ifa_addr->sa_family == AF_INET && (i->ifa_flags & IFF_UP) && (i->ifa_flags & IFF_RUNNING) && !(i->ifa_flags & IFF_LOOPBACK);
+    /* an IPv4 address, or an IPv6 one beyond the link (unique local or global): an IPv6-only network has no IPv4 at
+     * all, and counting only IPv4 took it for no network (Improv advertising, the action button taken: 2026-11-22) */
+    for (i = ifs; i && !on; i = i->ifa_next) {
+        if (!i->ifa_addr || !(i->ifa_flags & IFF_UP) || !(i->ifa_flags & IFF_RUNNING) || (i->ifa_flags & IFF_LOOPBACK)) continue;
+        if (i->ifa_addr->sa_family == AF_INET) on = 1;
+        else if (i->ifa_addr->sa_family == AF_INET6) {
+            const struct in6_addr *a = &((const struct sockaddr_in6 *)i->ifa_addr)->sin6_addr;
+            on = !IN6_IS_ADDR_LINKLOCAL(a) && !IN6_IS_ADDR_LOOPBACK(a) && !IN6_IS_ADDR_UNSPECIFIED(a);
+        }
+    }
     freeifaddrs(ifs);
     return on;
 }
